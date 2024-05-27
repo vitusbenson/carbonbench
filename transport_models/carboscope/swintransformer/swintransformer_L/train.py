@@ -9,7 +9,12 @@ import torch
 import xarray as xr
 from pytorch_lightning.profilers import AdvancedProfiler
 
-from neural_transport.datasets.vars import *
+from neural_transport.datasets.vars import (
+    CARBOSCOPE_CARBON2D_VARS,
+    CARBOSCOPE_CARBON3D_VARS,
+    CARBOSCOPE_METEO2D_VARS,
+    CARBOSCOPE_METEO3D_VARS,
+)
 from neural_transport.training import train_and_eval_rollout, train_and_eval_singlestep
 
 torch.set_float32_matmul_precision("high")
@@ -56,22 +61,26 @@ METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in TARGET_VARS}
 
 
 MODEL_DIMS = {
-    "S": dict(embed_dim=128),
-    "M": dict(embed_dim=256),
-    "L": dict(embed_dim=512),
+    "S": dict(embed_dim=512, depth=12, img_window_ratio=8),
+    "M": dict(embed_dim=768, depth=12, img_window_ratio=8),
+    "L": dict(embed_dim=1024, depth=24, img_window_ratio=4),
 }
 
 MODEL_SIZE = "L"
 
 model_kwargs = dict(
     model_kwargs=dict(
+        img_size=(64, 96),
+        patch_size=4,
+        embed_dim=MODEL_DIMS[MODEL_SIZE]["embed_dim"],
+        depths=(MODEL_DIMS[MODEL_SIZE]["depth"],),
         in_chans=LEN_ALL_VARS,
         out_chans=LEN_ALL_TARGET_VARS,
-        embed_dim=MODEL_DIMS[MODEL_SIZE]["embed_dim"],
-        act="leakyrelu",
-        norm="batch",
-        enc_filters=[[7], [3, 3], [3, 3], [3, 3]],
-        dec_filters=[[3, 3], [3, 3], [3, 3], [3, 3]],
+        num_heads=(8,),
+        img_window_ratio=MODEL_DIMS[MODEL_SIZE]["img_window_ratio"],
+        mlp_ratio=4.0,
+        drop_path_rate=0.1,
+        interpolation_mode="bilinear",
     ),
     input_vars=TARGET_VARS + FORCING_VARS,
     target_vars=TARGET_VARS,
@@ -83,7 +92,7 @@ model_kwargs = dict(
 )
 
 lit_module_kwargs = dict(
-    model="unet",
+    model="swintransformer",
     model_kwargs=model_kwargs,
     loss="mse",
     loss_kwargs=dict(weights=LOSS_WEIGHTS),
@@ -139,7 +148,6 @@ data_kwargs = dict(
         "co2flux_subt",
         "cell_area",
     ],
-    # time_interval=["1990-01-01", "2014-12-31"],
 )
 
 data_path_forecast = Path("/User/homes/vbenson/vbenson/graph_tm/data/Carboscope/test/")
