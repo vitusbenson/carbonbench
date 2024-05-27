@@ -115,6 +115,7 @@ def plot_four_metrics_over_leadtime(preds, targs, varname, figsize=(11, 5), freq
                         horizontalalignment="right",
                     )
             else:
+                trans = ax.get_xaxis_transform()
                 ax.text(
                     89,
                     0.05 if metric == "r2" else 0.95,
@@ -231,7 +232,7 @@ if __name__ == "__main__":
         out_dir = "/User/homes/vbenson/vbenson/CarbonBench/carbonbench/plotting/first_paper/quarterly_key_metrics_per_model"
         from tqdm import tqdm
 
-        for experiment in tqdm(experiments):
+        for experiment in tqdm(experiments[::-1]):
             print(experiment["model_name"])
             plot_quarterly_key_metrics_for_model(
                 target_path,
