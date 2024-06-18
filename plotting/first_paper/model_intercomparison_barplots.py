@@ -28,19 +28,30 @@ def get_obspack_tm3_dataframe(pred_path):
 
 
 def collect_dataframes_from_runs(runs):
+    sort_order = {m[0]: i for i, m in enumerate(runs)}
     global_dfs = []
-    for model, path in runs.items():
+    for model, path in runs:
         df = pd.read_csv(path / "metrics.csv")
         df["model"] = model
         global_dfs.append(df)
     global_df = pd.concat(global_dfs)
+    global_df["model"] = pd.Categorical(
+        global_df["model"],
+        categories=sorted(sort_order, key=sort_order.get),
+        ordered=True,
+    )
 
     station_dfs = []
-    for model, path in runs.items():
+    for model, path in runs:
         df = pd.read_csv(path / "obs_metrics.csv")
         df["model"] = model
         station_dfs.append(df)
     station_df = pd.concat(station_dfs)
+    station_df["model"] = pd.Categorical(
+        station_df["model"],
+        categories=sorted(sort_order, key=sort_order.get),
+        ordered=True,
+    )
     return global_df, station_df
 
 
@@ -120,17 +131,21 @@ def plot_model_intercomparison_barplots(
                 zorder=-3,
             )
             ax2.axhline(tm3_r2_mean, color="black", linestyle="--", zorder=-3)
-            ax2.text(
-                1.7,
-                tm3_r2_mean + 0.5 * tm3_r2_se,
-                "TM3",
-                color="black",
-                ha="center",
-                va="center",
-                zorder=-3,
-                # rotation=90,
-                fontsize=mpl_rc_params["xtick.labelsize"],
+            ax2.set_yticks(
+                [0, 0.25, 0.5, 0.75, tm3_r2_mean, 1],
+                labels=[0, 0.25, 0.5, 0.75, "TM3", 1],
             )
+            # ax2.text(
+            #     0.7,
+            #     tm3_r2_mean + 0.7 * tm3_r2_se,
+            #     "TM3",
+            #     color="black",
+            #     ha="center",
+            #     va="center",
+            #     zorder=-3,
+            #     # rotation=90,
+            #     fontsize=mpl_rc_params["xtick.labelsize"],
+            # )
         ax.patch.set_visible(False)
         ax.set_zorder(ax2.get_zorder() + 1)
         ax.set_ylabel("Decorrelation time [days]", color=blue_color)
@@ -193,20 +208,22 @@ def plot_model_intercomparison_barplots(
                 zorder=0,
             )
             ax3.axhline(tm3_rmse_mean, color="black", linestyle="--", zorder=0)
-            ax3.text(
-                -0.3,
-                tm3_rmse_mean + 0.5 * tm3_rmse_se,
-                "TM3",
-                color="black",
-                ha="center",
-                va="center",
-                zorder=0,
-                # rotation=90,
-                fontsize=mpl_rc_params["xtick.labelsize"],
-            )
+            ax3.set_yticks([0, 1, tm3_rmse_mean, 2.5, 5], labels=[0, 1, "TM3", 2.5, 5])
+            # ax3.text(
+            #     -0.3,
+            #     tm3_rmse_mean + 0.5 * tm3_rmse_se,
+            #     "TM3",
+            #     color="black",
+            #     ha="center",
+            #     va="center",
+            #     zorder=0,
+            #     # rotation=90,
+            #     fontsize=mpl_rc_params["xtick.labelsize"],
+            # )
 
         ax3.set_xlim(-0.5, n_models - 0.5)
         ax3.set_xlabel("")
+        ax3.set_ylim(0, 5)
         axs[1].set_xticklabels(axs[1].get_xticklabels(), rotation=20, ha="center")
         ax3.set_xticklabels(ax3.get_xticklabels(), rotation=20, ha="center")
         plt.tight_layout()
@@ -229,23 +246,44 @@ def plot_model_intercomparison_barplots(
 
 
 if __name__ == "__main__":
-    Models = {
-        "GraphCast": Path(
-            "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240115/graphcast_L0-L3_M/"
+    Models = [
+        (
+            "UNet",
+            Path(
+                "/User/homes/vbenson/vbenson/CarbonBench/carbonbench/transport_models/carboscope/unet/unet_L_v2/rollout/scores"
+            ),
         ),
-        # "IcosaGNN": Path(
-        #     "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240404/graphtm_L3_M/"
-        # ),
-        "SFNO": Path(
-            "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240309/sfno_L_addflux/"
+        (
+            "GraphCast",
+            Path(
+                "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240115/graphcast_L0-L3_M/"
+            ),
         ),
-        # "HybridSFNO": Path(
-        #     "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240522/hybridsfno_L"
-        # ),
-        "SwinTransformer": Path(
-            "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240517/swintransformer_M"
+        (
+            "IcosaGNN",
+            Path(
+                "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240404/graphtm_L3_M/"
+            ),
         ),
-    }
+        (
+            "SFNO",
+            Path(
+                "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240309/sfno_L_addflux/"
+            ),
+        ),
+        (
+            "HybridSFNO",
+            Path(
+                "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240522/hybridsfno_L"
+            ),
+        ),
+        (
+            "SwinTransformer",
+            Path(
+                "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240517/swintransformer_M"
+            ),
+        ),
+    ]
 
     global_df, station_df = collect_dataframes_from_runs(Models)
     tm3_df = get_obspack_tm3_dataframe(

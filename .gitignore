@@ -165,3 +165,11 @@ cython_debug/
 events.out.tfevents.*
 *.log
 *.nc
+*.pdf 
+*.png 
+*.svg 
+*.gif 
+*.mp4 
+*.zarr
+*.csv
+*hparams.yaml

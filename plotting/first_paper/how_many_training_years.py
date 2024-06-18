@@ -86,11 +86,11 @@ def plot_metrics(
             ].r2.mean()
             ax2.axhline(tm3_r2_mean, color=orange_color, linestyle="--", zorder=0)
             ax2.text(
-                -0.5,
+                60,
                 tm3_r2_mean + 0.02,
                 "TM3",
                 color="black",
-                ha="left",
+                ha="right",
                 va="center",
                 zorder=0,
                 # rotation=90,
@@ -138,11 +138,11 @@ def plot_metrics(
             ].rmse.mean()
             ax3.axhline(tm3_rmse_mean, color=orange_color, linestyle="--", zorder=0)
             ax3.text(
-                -0.5,
+                60,
                 tm3_rmse_mean - 0.3,
                 "TM3",
                 color="black",
-                ha="left",
+                ha="right",
                 va="center",
                 zorder=0,
                 # rotation=90,
@@ -179,7 +179,7 @@ if __name__ == "__main__":
         )
         for years in [1, 2, 5, 10, 25]  #
     }
-    Models["SFNO_39y"] = Path(
+    Models["SFNO_58y"] = Path(
         "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240309/sfno_L_addflux"
     )
 
