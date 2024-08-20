@@ -68,10 +68,17 @@ def plot_model_intercomparison_barplots(
     imgformats=["svg", "png", "pdf"],
 ):
     with mpl.rc_context(mpl_rc_params):
-        fig, axs = plt.subplots(1, 2, figsize=(10, 6), width_ratios=(5, 5))
+        fig, axs = plt.subplots(
+            2,
+            2,
+            figsize=(10, 7),
+            width_ratios=(5, 5),
+            height_ratios=(3, 4),
+            sharex=True,
+        )
 
-        ax = axs[0]
-        ax2 = ax.twinx()
+        ax = axs[0, 0]
+        ax2 = axs[1, 0]  # ax.twinx()
 
         blue_color = "#3274a1"
         orange_color = "#e1812b"
@@ -83,8 +90,8 @@ def plot_model_intercomparison_barplots(
             x="model",
             y="Decorrelation time [days]",
             ax=ax,
-            width=0.4,
-            position=1,
+            # width=0.4,
+            # position=1,
             legend=False,
             color=blue_color,
             capsize=3,
@@ -110,8 +117,8 @@ def plot_model_intercomparison_barplots(
             x="model",
             y=r"$R^2$",
             ax=ax2,
-            width=0.4,
-            position=0,
+            # width=0.4,
+            # position=0,
             legend=False,
             yerr=stds,
             color=orange_color,
@@ -152,16 +159,16 @@ def plot_model_intercomparison_barplots(
             #     fontsize=mpl_rc_params["xtick.labelsize"],
             # )
         ax.patch.set_visible(False)
-        ax.set_zorder(ax2.get_zorder() + 1)
-        ax.set_ylabel("Decorrelation time [days]", color=blue_color)
-        ax.tick_params(axis="y", labelcolor=blue_color)
-        ax2.set_ylabel(r"$R^2$", color=orange_color)
-        ax2.tick_params(axis="y", labelcolor=orange_color)
+        # ax.set_zorder(ax2.get_zorder() + 1)
+        ax.set_ylabel("Decorrelation time [days]", color="black")  # blue_color)
+        ax.tick_params(axis="y", labelcolor="black")  # blue_color)
+        ax2.set_ylabel(r"$R^2$", color="black")  # orange_color)
+        ax2.tick_params(axis="y", labelcolor="black")  # orange_color)
         ax.set_ylim(0, 1000)
         ax2.set_ylim(0, 1)
         ax.set_xlabel("")
 
-        ax.set_xticklabels(ax.get_xticklabels(), rotation=20, ha="center")
+        # ax.set_xticklabels(ax.get_xticklabels(), rotation=20, ha="center")
         ax.set_xlim(-0.5, n_models - 0.5)
         # plt.xticks(rotation=20, ha="center")
 
@@ -181,12 +188,24 @@ def plot_model_intercomparison_barplots(
         global_rmse["Test Data"] = "Global"
         rmse_df = pd.concat([station_rmse, global_rmse])
 
-        axs[1].set_ylabel("")
-        axs[1].set_yticks([])
-        ax3 = axs[1].twinx()
+        # axs[1].set_ylabel("")
+        # axs[1].set_yticks([])
+        ax3 = axs[1, 1]  # axs[1].twinx()
 
         sns.barplot(
-            data=rmse_df,
+            data=rmse_df[rmse_df["Test Data"] == "Global"],
+            x="model",
+            y="RMSE [ppm]",
+            hue="Test Data",
+            hue_order=["Global", "Station"],
+            errorbar=("se", 2),
+            ax=axs[0, 1],
+            capsize=0.1,
+            legend=False,
+            width=0.5,
+        )
+        sns.barplot(
+            data=rmse_df[rmse_df["Test Data"] == "Station"],
             x="model",
             y="RMSE [ppm]",
             hue="Test Data",
@@ -194,8 +213,8 @@ def plot_model_intercomparison_barplots(
             errorbar=("se", 2),
             ax=ax3,
             capsize=0.1,
+            width=0.5,
         )
-
         if tm3_df is not None:
             tm3_rmse_mean = tm3_df[
                 tm3_df.obs_filename.str.contains("representative")
@@ -213,9 +232,7 @@ def plot_model_intercomparison_barplots(
                 zorder=0,
             )
             ax3.axhline(tm3_rmse_mean, color="black", linestyle="--", zorder=0)
-            ax3.set_yticks(
-                [0, 1, 2, tm3_rmse_mean, 3, 4], labels=[0, 1, 2, "TM5", 3, 4]
-            )
+            ax3.set_yticks([0, 1, 2, tm3_rmse_mean, 3], labels=[0, 1, 2, "TM5", 3])
             # ax3.text(
             #     -0.3,
             #     tm3_rmse_mean + 0.5 * tm3_rmse_se,
@@ -230,18 +247,63 @@ def plot_model_intercomparison_barplots(
 
         ax3.set_xlim(-0.5, n_models - 0.5)
         ax3.set_xlabel("")
-        ax3.set_ylim(0, 4)
-        axs[1].set_xticklabels(axs[1].get_xticklabels(), rotation=20, ha="center")
+        axs[1, 0].set_xlabel("")
+        ax3.set_ylim(0, 3)
+        axs[0, 1].set_ylim(0, 1)
+        axs[0, 1].set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+        axs[1, 0].set_xticklabels(axs[1, 0].get_xticklabels(), rotation=20, ha="center")
         ax3.set_xticklabels(ax3.get_xticklabels(), rotation=20, ha="center")
         plt.tight_layout()
         sns.move_legend(
             ax3,
-            "upper center",
-            bbox_to_anchor=(0.05, 1),
+            "upper right",
+            bbox_to_anchor=(1.05, 1.9),
             frameon=True,
             facecolor="white",
             framealpha=1,
         )
+
+        axs[0, 0].text(
+            -0.15,
+            1.05,
+            "a",
+            transform=axs[0, 0].transAxes,
+            fontsize=14,
+            fontweight="bold",
+            va="top",
+            ha="right",
+        )
+        axs[0, 1].text(
+            -0.15,
+            1.05,
+            "b",
+            transform=axs[0, 1].transAxes,
+            fontsize=14,
+            fontweight="bold",
+            va="top",
+            ha="right",
+        )
+        axs[1, 0].text(
+            -0.15,
+            1.05,
+            "c",
+            transform=axs[1, 0].transAxes,
+            fontsize=14,
+            fontweight="bold",
+            va="top",
+            ha="right",
+        )
+        axs[1, 1].text(
+            -0.15,
+            1.05,
+            "d",
+            transform=axs[1, 1].transAxes,
+            fontsize=14,
+            fontweight="bold",
+            va="top",
+            ha="right",
+        )
+
         for imgformat in imgformats:
             plt.savefig(
                 Path(out_path) / f"model_intercomparison_barplots.{imgformat}",
