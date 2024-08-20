@@ -33,6 +33,11 @@ def collect_dataframes_from_runs(runs):
     for model, path in runs:
         df = pd.read_csv(path / "metrics.csv")
         df["model"] = model
+        try:
+            df2 = pd.read_csv(path / "metrics_None.csv")
+            df["Days_R2>0.9_co2molemix"] = df2["Days_R2>0.9_co2molemix"]
+        except:
+            print("No metrics_None.csv found")
         global_dfs.append(df)
     global_df = pd.concat(global_dfs)
     global_df["model"] = pd.Categorical(
@@ -72,7 +77,7 @@ def plot_model_intercomparison_barplots(
         orange_color = "#e1812b"
 
         global_df.rename(
-            columns={"Days_R2>0.8_co2molemix": "Decorrelation time [days]"}
+            columns={"Days_R2>0.9_co2molemix": "Decorrelation time [days]"}
         ).plot(
             kind="bar",
             x="model",
@@ -132,8 +137,8 @@ def plot_model_intercomparison_barplots(
             )
             ax2.axhline(tm3_r2_mean, color="black", linestyle="--", zorder=-3)
             ax2.set_yticks(
-                [0, 0.25, 0.5, 0.75, tm3_r2_mean, 1],
-                labels=[0, 0.25, 0.5, 0.75, "TM3", 1],
+                [0, 0.2, 0.4, 0.6, tm3_r2_mean, 0.8, 1],
+                labels=[0, 0.2, 0.4, 0.6, "TM5", 0.8, 1],
             )
             # ax2.text(
             #     0.7,
@@ -152,7 +157,7 @@ def plot_model_intercomparison_barplots(
         ax.tick_params(axis="y", labelcolor=blue_color)
         ax2.set_ylabel(r"$R^2$", color=orange_color)
         ax2.tick_params(axis="y", labelcolor=orange_color)
-        ax.set_ylim(0, 90)
+        ax.set_ylim(0, 1000)
         ax2.set_ylim(0, 1)
         ax.set_xlabel("")
 
@@ -208,7 +213,9 @@ def plot_model_intercomparison_barplots(
                 zorder=0,
             )
             ax3.axhline(tm3_rmse_mean, color="black", linestyle="--", zorder=0)
-            ax3.set_yticks([0, 1, tm3_rmse_mean, 2.5, 5], labels=[0, 1, "TM3", 2.5, 5])
+            ax3.set_yticks(
+                [0, 1, 2, tm3_rmse_mean, 3, 4], labels=[0, 1, 2, "TM5", 3, 4]
+            )
             # ax3.text(
             #     -0.3,
             #     tm3_rmse_mean + 0.5 * tm3_rmse_se,
@@ -223,7 +230,7 @@ def plot_model_intercomparison_barplots(
 
         ax3.set_xlim(-0.5, n_models - 0.5)
         ax3.set_xlabel("")
-        ax3.set_ylim(0, 5)
+        ax3.set_ylim(0, 4)
         axs[1].set_xticklabels(axs[1].get_xticklabels(), rotation=20, ha="center")
         ax3.set_xticklabels(ax3.get_xticklabels(), rotation=20, ha="center")
         plt.tight_layout()
@@ -247,51 +254,52 @@ def plot_model_intercomparison_barplots(
 
 if __name__ == "__main__":
     Models = [
+        # (
+        #     "UNet",
+        #     Path(
+        #         "/User/homes/vbenson/vbenson/CarbonBench/carbonbench/transport_models/carbontracker/unet/unet_M_targshift_latlon5.625_l10_6h/rollout/scores/ckpt=best_massfixer=scale"
+        #     ),
+        # ),
         (
-            "UNet",
+            "UNet",  # "UNetAroma",
             Path(
-                "/User/homes/vbenson/vbenson/CarbonBench/carbonbench/transport_models/carboscope/unet/unet_L_v2/rollout/scores"
+                "/User/homes/vbenson/vbenson/CarbonBench/carbonbench/transport_models/carbontracker_lowres/unet/unet_M_tsaf_specloss/rollout/scores/ckpt=best_massfixer=scale"
             ),
         ),
         (
             "GraphCast",
             Path(
-                "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240115/graphcast_L0-L3_M/"
-            ),
-        ),
-        (
-            "IcosaGNN",
-            Path(
-                "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240404/graphtm_L3_M/"
+                "/User/homes/vbenson/vbenson/CarbonBench/carbonbench/transport_models/carbontracker_lowres/graphcast/graphcast_M_m0-m3_tsaf_specloss/rollout/scores/ckpt=best_massfixer=scale"  # "/User/homes/vbenson/vbenson/CarbonBench/carbonbench/transport_models/carbontracker/graphcast/graphcast_M_targshift_m0-m2_latlon5.625_l10_6h/rollout/scores/ckpt=best_massfixer=scale"
             ),
         ),
         (
             "SFNO",
             Path(
-                "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240309/sfno_L_addflux/"
+                "/User/homes/vbenson/vbenson/CarbonBench/carbonbench/transport_models/carbontracker_lowres/sfno/sfno_L_tsaf_specloss/rollout/scores/ckpt=best_massfixer=scale"
             ),
         ),
-        (
-            "HybridSFNO",
-            Path(
-                "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240522/hybridsfno_L"
-            ),
-        ),
+        # (
+        #     "SFNOHR",
+        #     Path(
+        #         "/User/homes/vbenson/vbenson/CarbonBench/carbonbench/transport_models/carbontracker_midres/sfno/sfno_L_tsaf_specloss_long/rollout/scores/ckpt=best_massfixer=scale"
+        #     ),
+        # ),
         (
             "SwinTransformer",
             Path(
-                "/User/homes/vbenson/vbenson/graph_tm/experiments/carboscope/transport/runs_20240517/swintransformer_M"
+                "/User/homes/vbenson/vbenson/CarbonBench/carbonbench/transport_models/carbontracker_lowres/swintransformer/swintransformer_S_p1w4_tsaf_specloss/rollout/scores/ckpt=best_massfixer=scale"
             ),
         ),
     ]
 
     global_df, station_df = collect_dataframes_from_runs(Models)
     tm3_df = get_obspack_tm3_dataframe(
-        "/User/homes/vbenson/vbenson/graph_tm/data/Carboscope/test/obspack_carboscope.zarr"
+        "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/obs_carbontracker_latlon5.625_l10_6h.zarr"  # "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/obs_carbontracker_latlon2x3_l34_3h.zarr"  #
     )
     plot_model_intercomparison_barplots(
         global_df,
         station_df,
-        "/User/homes/vbenson/vbenson/CarbonBench/carbonbench/plotting/first_paper/model_intercomparison_barplots/",
+        "/User/homes/vbenson/vbenson/CarbonBench/carbonbench/plotting/first_paper/",
         tm3_df=tm3_df,
+        imgformats=["pdf"],
     )
