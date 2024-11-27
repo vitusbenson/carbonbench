@@ -16,7 +16,7 @@
 
 # Building CarbonBench Dataset
 
-The script [`data/create_carbontracker_dataset.py`](data/create_carbontracker_dataset.py) can download and pre-process the CarbonTracker and ObsPack data into the CarbonBench format.
+The scripts under [`data/`](data/) can download and pre-process the CarbonTracker and ObsPack data into the CarbonBench format.
 
 ### CarbonBench LowRes
 ```
@@ -34,6 +34,8 @@ python data/create_carbontracker_dataset.py --save_dir path_to_store_data --grid
 ```
 python data/create_obspack_dataset.py --save_dir path_to_store_data --freq "3h"
 ```
+
+>>> Before running these scripts, make sure that you have enough disk space (>>1TB) and enough memory on your machine (> 250GB)
 
 # Training Models
 
@@ -76,6 +78,12 @@ transport_models/dataset/model/experiment
 |  ├── ...
 ...
 ```
+
+>>> The scripts will expect at least 1 GPU to train on, we recommend an NVIDIA A100 with 80GB, to not run into issues with GPU memory.
+
+### Reproducing figures from Benson et al. 2024
+1. Train (all / some) models (see above)
+2. Run the plotting scripts under [`plotting/first_paper`](plotting/first_paper): Adjust all paths in these scripts to match the paths where you stored data and experiment outputs.
 
 # Installation
 
