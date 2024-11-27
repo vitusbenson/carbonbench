@@ -10,11 +10,14 @@
 <a href="https://twitter.com/vitusbenson" target="_blank">
     <img src="https://img.shields.io/twitter/follow/vitusbenson?style=social" alt="Twitter">
 </a>
+<a href="https://bsky.app/profile/vitusbenson.bsky.social" target="_blank">
+    <img src="https://img.shields.io/badge/Follow%20vitusbenson.bsky.social-0285FF?logo=bluesky&logoColor=fff" alt="BlueSky">
+</a>
 <a href="https://arxiv.org/abs/2408.11032" target="_blank">
     <img src="https://img.shields.io/badge/arXiv-2408.11032-b31b1b.svg" alt="ArXiv">
 </a>
 
-# Building CarbonBench Dataset
+## Building CarbonBench Dataset
 
 The scripts under [`data/`](data/) can download and pre-process the CarbonTracker and ObsPack data into the CarbonBench format.
 
@@ -37,7 +40,7 @@ python data/create_obspack_dataset.py --save_dir path_to_store_data --freq "3h"
 
 >>> Before running these scripts, make sure that you have enough disk space (>>1TB) and enough memory on your machine (> 250GB)
 
-# Training Models
+## Training Models
 
 Models can be trained with the python scripts under [`transport_models`](transport_models/)
 
@@ -85,11 +88,11 @@ transport_models/dataset/model/experiment
 1. Train (all / some) models (see above)
 2. Run the plotting scripts under [`plotting/first_paper`](plotting/first_paper): Adjust all paths in these scripts to match the paths where you stored data and experiment outputs.
 
-# Installation
+## Installation
 
 Make sure to install [NeuralTransport](https://github.com/vitusbenson/neural_transport), then you should be able to run the scripts.
 
-# Cite CarbonBench
+## Cite CarbonBench
 
 In case you use CarbonBench in your research or work, it would be highly appreciated if you include a reference to our [paper](https://arxiv.org/abs/2408.11032) in any kind of publication.
 
@@ -105,7 +108,7 @@ In case you use CarbonBench in your research or work, it would be highly appreci
 }
 ```
 
-# Contact
+## Contact
 
 For questions or comments regarding the usage of this repository, please use the [discussion section](https://github.com/vitusbenson/carbonbench/discussions) on Github. For bug reports and feature requests, please open an [issue](https://github.com/vitusbenson/carbonbench/issues) on GitHub.
 In special cases, you can reach out to Vitus (find his email on his [website](https://vitusbenson.github.io/)).
