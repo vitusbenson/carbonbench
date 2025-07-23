@@ -23,10 +23,10 @@ torch.set_float32_matmul_precision("high")
 pl.seed_everything(42)
 
 TARGET_VARS = ["co2massmix"]
+# Uncomment for conditional Flow Matching
 FORCING_VARS_1D = [
     # "flow_time"
 ]
-# Uncomment for conditional Flow Matching
 FORCING_VARS_2D = [
     # "blh",
     # "cell_area",
@@ -93,6 +93,7 @@ MODEL_DIMS = {
 MODEL_SIZE = "S"
 
 model_kwargs = dict(
+    # model="unet",
     model_kwargs=dict(
         in_chans=LEN_ALL_VARS,
         out_chans=LEN_ALL_TARGET_VARS,
@@ -104,17 +105,20 @@ model_kwargs = dict(
         in_interpolation="bilinear",
         out_interpolation="nearest-exact",
         out_clip=None,
+        input_vars=TARGET_VARS + FORCING_VARS,
+        target_vars=TARGET_VARS,
+        nlat=len(lat),
+        nlon=len(lon),
+        nlev=nlev,
+        predict_delta=True,
+        add_surfflux=False,
+        dt=60 * 60 * 6,
+        massfixer="",
+        targshift=True,
     ),
-    input_vars=TARGET_VARS + FORCING_VARS,
-    target_vars=TARGET_VARS,
-    nlat=len(lat),
-    nlon=len(lon),
-    nlev=nlev,
-    predict_delta=True,
-    add_surfflux=False,
-    dt=60 * 60 * 6,
-    massfixer="",
-    targshift=True,
+    return_intermediates=False,
+    method="midpoint",
+    step_size=0.05,
 )
 
 lit_module_kwargs = dict(
@@ -122,7 +126,7 @@ lit_module_kwargs = dict(
     model_kwargs=model_kwargs,
     loss="mse",
     loss_kwargs=dict(
-        weights=LOSS_WEIGHTS, spectral_power_weight=0.1, nlat=len(lat), nlon=len(lon)
+        weights=LOSS_WEIGHTS, spectral_power_weight=0.0, nlat=len(lat), nlon=len(lon)
     ),
     metrics=[
         dict(name=m, kwargs=dict(weights=METRIC_WEIGHTS))
