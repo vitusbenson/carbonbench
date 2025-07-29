@@ -1,22 +1,38 @@
+"""
+Training and evaluation script for Flow Matching models on given data.
+
+This script sets up the model architecture, training configuration,
+and dataset parameters for predicting atmospheric CO2 mass mixing ratios
+using the Flow Matching method implemented in the `neural_transport` framework.
+
+It supports both single-step training/evaluation and multi-step rollout evaluation.
+Execution mode is selected via command-line arguments.
+
+Typical usage:
+    python script_name.py --rollout        # Run rollout evaluation
+    python script_name.py --only_pred      # Only evaluate, no training
+    python script_name.py --ckpt best      # Use 'best' checkpoint instead of default 'last'
+    python script_name.py --data_path ...  # Override dataset path
+"""
+
 #!usr/bin/python
 
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
-import xarray as xr
+import pytorch_lightning as pl
 
 # torch
 import torch
-import pytorch_lightning as pl
-from pytorch_lightning.profilers import AdvancedProfiler
-
-# neural_transport
+import xarray as xr
 from neural_transport.datasets.grids import (
     LATLON_PROTOTYPE_COORDS,
     VERTICAL_LAYERS_PROTOTYPE_COORDS,
 )
-from neural_transport.datasets.vars import *
+from neural_transport.datasets.vars import *  # noqa: F403
+
+# neural_transport
+from neural_transport.models.wrappers_registry import MODELWRAPPERS
 from neural_transport.training import train_and_eval_rollout, train_and_eval_singlestep
 
 torch.set_float32_matmul_precision("high")
@@ -92,38 +108,49 @@ MODEL_DIMS = {
 
 MODEL_SIZE = "S"
 
-model_kwargs = dict(
-    # model="unet",
-    model_kwargs=dict(
-        in_chans=LEN_ALL_VARS,
-        out_chans=LEN_ALL_TARGET_VARS,
-        embed_dim=MODEL_DIMS[MODEL_SIZE]["embed_dim"],
-        act="leakyrelu",
-        norm="batch",
-        enc_filters=[[7], [3, 3], [3, 3], [3, 3]],
-        dec_filters=[[3, 3], [3, 3], [3, 3], [3, 3]],
-        in_interpolation="bilinear",
-        out_interpolation="nearest-exact",
-        out_clip=None,
-        input_vars=TARGET_VARS + FORCING_VARS,
-        target_vars=TARGET_VARS,
-        nlat=len(lat),
-        nlon=len(lon),
-        nlev=nlev,
-        predict_delta=True,
-        add_surfflux=False,
-        dt=60 * 60 * 6,
-        massfixer="",
-        targshift=True,
-    ),
-    return_intermediates=False,
-    method="midpoint",
-    step_size=0.05,
+regulargrid_kwargs = dict( # for RegularGridModel
+    input_vars=TARGET_VARS + FORCING_VARS,
+    target_vars=TARGET_VARS,
+    nlat=len(lat),
+    nlon=len(lon),
+    predict_delta=False,
+    add_surfflux=False,
+    dt=60 * 60 * 6,
+    massfixer="",
+    targshift=False,
 )
 
+wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
+    **regulargrid_kwargs,
+    model_kwargs=dict( # for FlowMatching
+        submodel="unet",
+        model_kwargs=dict( # for RegularGridModel (UNet)
+            **regulargrid_kwargs,
+            model_kwargs=dict( # for UNet
+                in_chans=LEN_ALL_VARS + 1, # + 1 for flow_time
+                out_chans=LEN_ALL_TARGET_VARS,
+                embed_dim=MODEL_DIMS[MODEL_SIZE]["embed_dim"],
+                act="leakyrelu",
+                norm="batch",
+                enc_filters=[[7], [3, 3], [3, 3], [3, 3]],
+                dec_filters=[[3, 3], [3, 3], [3, 3], [3, 3]],
+                in_interpolation="bilinear",
+                out_interpolation="nearest-exact",
+                out_clip=None,
+            ),
+        ),
+        return_intermediates=True,
+        method="midpoint",  # 'midpoint' or 'euler'
+        nlev=nlev,
+        step_size=0.1,
+    ),
+)
+
+flow = MODELWRAPPERS["flowmatching"](**wrapper_kwargs)
+
 lit_module_kwargs = dict(
-    model="flowmatching",
-    model_kwargs=model_kwargs,
+    model=flow,
+    model_kwargs=wrapper_kwargs["model_kwargs"],
     loss="mse",
     loss_kwargs=dict(
         weights=LOSS_WEIGHTS, spectral_power_weight=0.0, nlat=len(lat), nlon=len(lon)
@@ -139,7 +166,7 @@ lit_module_kwargs = dict(
     lr_shedule_kwargs=dict(
         warmup_steps=1000, halfcosine_steps=99000, min_lr=3e-7, max_lr=1.0
     ),
-    val_dataloader_names=["singlestep", "rollout"],  #
+    val_dataloader_names=["singlestep", "rollout"],
     plot_kwargs=dict(
         variables=["co2molemix"],
         layer_idxs=[0, 3, 5, 8],
@@ -185,7 +212,6 @@ data_kwargs = dict(
         # "tisr",
     ],
     compute=False,
-    # time_interval=["1990-01-01", "2014-12-31"],
 )
 
 data_path_forecast = Path(
@@ -204,9 +230,7 @@ trainer_kwargs = dict(
         "auto"
         if N_GPUS == 1
         else pl.strategies.DDPStrategy(find_unused_parameters=False)
-    ),
-    # profiler="simple"
-    # fast_dev_run=True,
+    ), # profiler="simple", fast_dev_run=True,
 )
 
 rollout_trainer_kwargs = dict(
@@ -223,10 +247,11 @@ rollout_trainer_kwargs = dict(
     ),
 )
 
-obs_compare_path = f"/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/obs_carbontracker_{grid}_{vertical_levels}_{freq}.zarr"
+obs_compare_path = f"/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/obs_carbontracker_{grid}_{vertical_levels}_{freq}.zarr"  # noqa: E501
 
 
-def main(rollout=False, train=True, ckpt="last", data_path=None):
+def main(rollout: bool = False, train: bool = True, ckpt: str = "last", data_path: str|None = None) -> None:
+    """Main function to run the training or rollout evaluation."""
     run_dir = Path(__file__).resolve().parent
 
     if data_path is not None:
