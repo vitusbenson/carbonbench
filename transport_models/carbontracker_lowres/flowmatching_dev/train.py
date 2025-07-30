@@ -153,13 +153,13 @@ lit_module_kwargs = dict(
     model_kwargs=wrapper_kwargs["model_kwargs"],
     loss="mse",
     loss_kwargs=dict(
-        weights=LOSS_WEIGHTS, spectral_power_weight=0.0, nlat=len(lat), nlon=len(lon)
+        weights=LOSS_WEIGHTS, spectral_power_weight=0.0, nlat=len(lat), nlon=len(lon), normalize_batch=True,
     ),
     metrics=[
         dict(name=m, kwargs=dict(weights=METRIC_WEIGHTS))
         for m in ["rmse", "r2", "nse", "rabsbias", "rrmse"]
-    ]
-    + [dict(name="mass_rmsev2", kwargs=dict(molecule=m)) for m in ["co2"]],
+    ],
+    # + [dict(name="mass_rmsev2", kwargs=dict(molecule=m)) for m in ["co2"]],
     no_grad_step_shedule=None,
     lr=1e-3,
     weight_decay=0.1,
@@ -308,3 +308,6 @@ if __name__ == "__main__":
         ckpt=args.ckpt,
         data_path=args.data_path,
     )
+
+# execute via:
+# CUDA_VISIBLE_DEVICES=7 python3 -u /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/train.py
