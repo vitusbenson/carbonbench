@@ -1,44 +1,67 @@
+"""
+Training and evaluation script for Flow Matching models on given data.
+
+This script sets up the model architecture, training configuration,
+and dataset parameters for predicting atmospheric CO2 mass mixing ratios
+using the Flow Matching method implemented in the `neural_transport` framework.
+
+It supports both single-step training/evaluation and multi-step rollout evaluation.
+Execution mode is selected via command-line arguments.
+
+Typical usage:
+    python script_name.py --rollout        # Run rollout evaluation
+    python script_name.py --only_pred      # Only evaluate, no training
+    python script_name.py --ckpt best      # Use 'best' checkpoint instead of default 'last'
+    python script_name.py --data_path ...  # Override dataset path
+"""
+
 #!usr/bin/python
 
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytorch_lightning as pl
+
+# torch
 import torch
 import xarray as xr
-from pytorch_lightning.profilers import AdvancedProfiler
-
 from neural_transport.datasets.grids import (
     LATLON_PROTOTYPE_COORDS,
     VERTICAL_LAYERS_PROTOTYPE_COORDS,
 )
-from neural_transport.datasets.vars import *
+from neural_transport.datasets.vars import *  # noqa: F403
+
+# neural_transport
+from neural_transport.models.wrappers_registry import MODELWRAPPERS
 from neural_transport.training import train_and_eval_rollout, train_and_eval_singlestep
 
 torch.set_float32_matmul_precision("high")
 pl.seed_everything(42)
 
 TARGET_VARS = ["co2massmix"]
+# Uncomment for conditional Flow Matching
+FORCING_VARS_1D = [
+    # "flow_time"
+]
 FORCING_VARS_2D = [
-    "blh",
-    "cell_area",
-    "co2flux_anthro",
-    "co2flux_land",
-    "co2flux_ocean",
-    "orography",
-    "tisr",
+    # "blh",
+    # "cell_area",
+    # "co2flux_anthro",
+    # "co2flux_land",
+    # "co2flux_ocean",
+    # "orography",
+    # "tisr",
 ]
 FORCING_VARS_3D = [
-    "airmass",
-    "gph_bottom",
-    "gph_top",
-    "p_bottom",
-    "p_top",
-    "q",
-    "t",
-    "u",
-    "v",
+    # "airmass",
+    # "gph_bottom",
+    # "gph_top",
+    # "p_bottom",
+    # "p_top",
+    # "q",
+    # "t",
+    # "u",
+    # "v",
 ]
 grid = "latlon5.625"
 vertical_levels = "l10"
@@ -46,9 +69,9 @@ freq = "6h"
 
 nlev = len(VERTICAL_LAYERS_PROTOTYPE_COORDS[vertical_levels]["level"])
 
-FORCING_VARS = FORCING_VARS_2D + FORCING_VARS_3D
+FORCING_VARS = FORCING_VARS_1D + FORCING_VARS_2D + FORCING_VARS_3D
 LEN_ALL_TARGET_VARS = nlev * len(TARGET_VARS)
-LEN_ALL_FORCING_VARS = len(FORCING_VARS_2D) + nlev * len(FORCING_VARS_3D)
+LEN_ALL_FORCING_VARS = len(FORCING_VARS_1D) + len(FORCING_VARS_2D) + nlev * len(FORCING_VARS_3D)
 LEN_ALL_VARS = LEN_ALL_TARGET_VARS + LEN_ALL_FORCING_VARS
 
 lat = LATLON_PROTOTYPE_COORDS[grid]["lat"]
@@ -85,49 +108,65 @@ MODEL_DIMS = {
 
 MODEL_SIZE = "S"
 
-model_kwargs = dict(
-    model_kwargs=dict(
-        in_chans=LEN_ALL_VARS,
-        out_chans=LEN_ALL_TARGET_VARS,
-        embed_dim=MODEL_DIMS[MODEL_SIZE]["embed_dim"],
-        act="leakyrelu",
-        norm="batch",
-        enc_filters=[[7], [3, 3], [3, 3], [3, 3]],
-        dec_filters=[[3, 3], [3, 3], [3, 3], [3, 3]],
-        in_interpolation="bilinear",
-        out_interpolation="nearest-exact",
-        out_clip=None,
-    ),
+regulargrid_kwargs = dict( # for RegularGridModel
     input_vars=TARGET_VARS + FORCING_VARS,
     target_vars=TARGET_VARS,
     nlat=len(lat),
     nlon=len(lon),
-    predict_delta=True,
-    add_surfflux=True,
+    predict_delta=False,
+    add_surfflux=False,
     dt=60 * 60 * 6,
-    massfixer="scale",
-    targshift=True,
+    massfixer="",
+    targshift=False,
 )
 
+wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
+    **regulargrid_kwargs,
+    model_kwargs=dict( # for FlowMatching
+        submodel="unet",
+        model_kwargs=dict( # for RegularGridModel (UNet)
+            **regulargrid_kwargs,
+            model_kwargs=dict( # for UNet
+                in_chans=LEN_ALL_VARS + 1, # + 1 for flow_time
+                out_chans=LEN_ALL_TARGET_VARS,
+                embed_dim=MODEL_DIMS[MODEL_SIZE]["embed_dim"],
+                act="leakyrelu",
+                norm="batch",
+                enc_filters=[[7], [3, 3], [3, 3], [3, 3]],
+                dec_filters=[[3, 3], [3, 3], [3, 3], [3, 3]],
+                in_interpolation="bilinear",
+                out_interpolation="nearest-exact",
+                out_clip=None,
+            ),
+        ),
+        return_intermediates=True,
+        method="midpoint",  # 'midpoint' or 'euler'
+        nlev=nlev,
+        step_size=0.1,
+    ),
+)
+
+flow = MODELWRAPPERS["flowmatching"](**wrapper_kwargs)
+
 lit_module_kwargs = dict(
-    model="unet",
-    model_kwargs=model_kwargs,
+    model=flow,
+    model_kwargs=wrapper_kwargs["model_kwargs"],
     loss="mse",
     loss_kwargs=dict(
-        weights=LOSS_WEIGHTS, spectral_power_weight=0.1, nlat=len(lat), nlon=len(lon)
+        weights=LOSS_WEIGHTS, spectral_power_weight=0.0, nlat=len(lat), nlon=len(lon), normalize_batch=True,
     ),
     metrics=[
         dict(name=m, kwargs=dict(weights=METRIC_WEIGHTS))
         for m in ["rmse", "r2", "nse", "rabsbias", "rrmse"]
-    ]
-    + [dict(name="mass_rmsev2", kwargs=dict(molecule=m)) for m in ["co2"]],
+    ],
+    # + [dict(name="mass_rmsev2", kwargs=dict(molecule=m)) for m in ["co2"]],
     no_grad_step_shedule=None,
     lr=1e-3,
     weight_decay=0.1,
     lr_shedule_kwargs=dict(
         warmup_steps=1000, halfcosine_steps=99000, min_lr=3e-7, max_lr=1.0
     ),
-    val_dataloader_names=["singlestep", "rollout"],  #
+    val_dataloader_names=["singlestep", "rollout"],
     plot_kwargs=dict(
         variables=["co2molemix"],
         layer_idxs=[0, 3, 5, 8],
@@ -154,26 +193,25 @@ data_kwargs = dict(
     batch_size_pred=BATCH_SIZE_PRED,
     num_workers=32 * N_GPUS,
     val_rollout_n_timesteps=31,
-    target_vars=["co2massmix", "airmass"],
+    target_vars=["co2massmix"], #, "airmass"
     forcing_vars=[
-        "gph_bottom",
-        "gph_top",
-        "p_bottom",
-        "p_top",
-        "q",
-        "t",
-        "u",
-        "v",
-        "blh",
-        "cell_area",
-        "co2flux_anthro",
-        "co2flux_land",
-        "co2flux_ocean",
-        "orography",
-        "tisr",
+        # "gph_bottom",
+        # "gph_top",
+        # "p_bottom",
+        # "p_top",
+        # "q",
+        # "t",
+        # "u",
+        # "v",
+        # "blh",
+        # "cell_area",
+        # "co2flux_anthro",
+        # "co2flux_land",
+        # "co2flux_ocean",
+        # "orography",
+        # "tisr",
     ],
     compute=False,
-    # time_interval=["1990-01-01", "2014-12-31"],
 )
 
 data_path_forecast = Path(
@@ -192,9 +230,7 @@ trainer_kwargs = dict(
         "auto"
         if N_GPUS == 1
         else pl.strategies.DDPStrategy(find_unused_parameters=False)
-    ),
-    # profiler="simple"
-    # fast_dev_run=True,
+    ), # profiler="simple", fast_dev_run=True,
 )
 
 rollout_trainer_kwargs = dict(
@@ -211,10 +247,11 @@ rollout_trainer_kwargs = dict(
     ),
 )
 
-obs_compare_path = f"/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/obs_carbontracker_{grid}_{vertical_levels}_{freq}.zarr"
+obs_compare_path = f"/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/obs_carbontracker_{grid}_{vertical_levels}_{freq}.zarr"  # noqa: E501
 
 
-def main(rollout=False, train=True, ckpt="last", data_path=None):
+def main(rollout: bool = False, train: bool = True, ckpt: str = "last", data_path: str|None = None) -> None:
+    """Main function to run the training or rollout evaluation."""
     run_dir = Path(__file__).resolve().parent
 
     if data_path is not None:
@@ -271,3 +308,8 @@ if __name__ == "__main__":
         ckpt=args.ckpt,
         data_path=args.data_path,
     )
+
+# execute via:
+# CUDA_VISIBLE_DEVICES=7 python3 -u /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/flowmatching_firstrun_20250730_dev/train.py
+# or:
+# sbatch train.slurm (check: squeue -u jgross)
