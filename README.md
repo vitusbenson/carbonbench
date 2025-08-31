@@ -7,6 +7,9 @@
 <a href="https://opensource.org/licenses/MIT" target="_blank">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
 </a>
+<a href="https://ai4carbon.github.io/datasets/carbonbench/" target="_blank">
+    <img src="https://img.shields.io/badge/Documentation-018EF5?logo=readme&logoColor=fff" alt="Documentation">
+</a>
 <a href="https://twitter.com/vitusbenson" target="_blank">
     <img src="https://img.shields.io/twitter/follow/vitusbenson?style=social" alt="Twitter">
 </a>
