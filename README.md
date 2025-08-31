@@ -20,6 +20,16 @@
     <img src="https://img.shields.io/badge/arXiv-2408.11032-b31b1b.svg" alt="ArXiv">
 </a>
 
+## Downloading CarbonBench from Huggingface
+
+You can download a standard version of CarbonBench from huggingface:
+
+```
+python data/download_from_huggingface.py --download-all --local-dir path_to_store_data
+```
+
+> Then you should continue with preparing the ObsPack data - this you can unfortunately not download from Huggingface for licensing reasons.
+
 ## Building CarbonBench Dataset
 
 The scripts under [`data/`](data/) can download and pre-process the CarbonTracker and ObsPack data into the CarbonBench format.
