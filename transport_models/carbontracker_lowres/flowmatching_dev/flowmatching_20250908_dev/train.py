@@ -117,7 +117,7 @@ regulargrid_kwargs = dict( # for RegularGridModel
     add_surfflux=False,
     dt=60 * 60 * 6,
     massfixer="",
-    targshift=False,
+    targshift=True,
 )
 
 wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
@@ -166,7 +166,7 @@ lit_module_kwargs = dict(
     lr_shedule_kwargs=dict(
         warmup_steps=1000, halfcosine_steps=99000, min_lr=3e-7, max_lr=1.0
     ),
-    val_dataloader_names=["singlestep", "rollout"],
+    val_dataloader_names=["singlestep"],
     plot_kwargs=dict(
         variables=["co2molemix"],
         layer_idxs=[0, 3, 5, 8],
@@ -192,7 +192,7 @@ data_kwargs = dict(
     batch_size_train=BATCH_SIZE_TRAIN // N_GPUS,
     batch_size_pred=BATCH_SIZE_PRED,
     num_workers=32 * N_GPUS,
-    val_rollout_n_timesteps=31,
+    val_rollout_n_timesteps=None,
     target_vars=["co2massmix"], #, "airmass"
     forcing_vars=[
         # "gph_bottom",
@@ -231,6 +231,7 @@ trainer_kwargs = dict(
         if N_GPUS == 1
         else pl.strategies.DDPStrategy(find_unused_parameters=False)
     ), # profiler="simple", fast_dev_run=True,
+    # overfit_batches=10, # for debugging only!!
 )
 
 rollout_trainer_kwargs = dict(
@@ -290,6 +291,14 @@ def main(rollout: bool = False, train: bool = True, ckpt: str = "last", data_pat
             num_workers=32,
             train=train,
             ckpt=ckpt,
+            ckpt_kwargs=dict(
+                save_top_k=1,  # -1,
+                save_last=True,
+                monitor="Loss/Val_singlestep",
+                filename="Epoch={epoch}-Step={step}-LossVal={Loss/Val_singlestep:.6f}",
+                auto_insert_metric_name=False,
+                every_n_epochs=1,
+            )
         )
 
 

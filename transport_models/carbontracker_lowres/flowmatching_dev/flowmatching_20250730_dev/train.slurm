@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:A100:1
 #SBATCH --job-name=flowmatching
 #SBATCH --mail-type=END
-#SBATCH -o /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/slurm_%A.out
+#SBATCH -o /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/flowmatching_20250730_dev/slurm_%A.out
 
 source activate neuraltransport
 
@@ -35,7 +35,7 @@ do
 done
 
 # Run flow matching training
-srun python3 -u /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/train.py --data_path $LOCAL_DIR # --rollout --only_pred --ckpt "best" 
+srun python3 -u /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/flowmatching_20250730_dev/train.py --data_path $LOCAL_DIR # --rollout --only_pred --ckpt "best"
 
 # Clean up scratch
 rm -rf $LOCAL_DIR
