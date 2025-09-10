@@ -117,7 +117,7 @@ regulargrid_kwargs = dict( # for RegularGridModel
     add_surfflux=False,
     dt=60 * 60 * 6,
     massfixer="",
-    targshift=False,
+    targshift=True,
 )
 
 wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
