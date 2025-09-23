@@ -2,7 +2,6 @@
 from collections import defaultdict
 from pathlib import Path
 
-%matplotlib inline
 import matplotlib.pyplot as plt
 import torch
 import xarray as xr
