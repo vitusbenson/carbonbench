@@ -214,7 +214,7 @@ data_kwargs = dict(
 )
 
 data_path_forecast = Path(
-    "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/train/"
+    "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/"
 )
 
 
