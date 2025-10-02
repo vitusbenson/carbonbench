@@ -219,7 +219,7 @@ data_path_forecast = Path(
 
 
 trainer_kwargs = dict(
-    max_steps=10000,
+    max_steps=100000,
     accelerator="gpu",
     devices=N_GPUS,
     log_every_n_steps=100,
@@ -319,6 +319,6 @@ if __name__ == "__main__":
 # execute via:
 # CUDA_VISIBLE_DEVICES=7 python3 -u
 # /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/
-# flowmatching_firstrun_20250730_dev/train.py
+# flowmatching_20251001_dev_longrun/train.py
 # or:
 # sbatch train.slurm (check: squeue -u jgross)

@@ -1,4 +1,4 @@
-from neural_transport.datasets.obspack import download_obspack, prepare_obspack_for_carboscope
+from neural_transport.datasets.obspack import set_freq, download_obspack, prepare_obspack_for_carboscope
 
 if __name__ == "__main__":
 
@@ -9,10 +9,10 @@ if __name__ == "__main__":
     parser.add_argument("--freq", type=str, default="3h")
     args = parser.parse_args()
 
-    FREQ = args.freq
+    set_freq(args.freq)
 
     download_obspack(args.save_dir)
 
     prepare_obspack_for_carboscope(
-        args.save_dir
+        args.save_dir,
     )
