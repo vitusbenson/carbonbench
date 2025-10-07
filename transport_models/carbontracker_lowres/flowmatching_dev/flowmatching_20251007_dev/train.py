@@ -1,5 +1,5 @@
 """
-! -> long run 100.000 steps
+! -> masking included
 
 Training and evaluation script for Flow Matching models on given data.
 
@@ -150,7 +150,13 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
 
 flow = MODELWRAPPERS["flowmatching"](**wrapper_kwargs)
 
-flow.n_samples = 100
+generate_kwargs = dict(
+    n_samples=100,
+    masking=True,
+    pattern="vertical",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "sattelite",
+    noise=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
+    analyze_noise=False,
+)
 
 lit_module_kwargs = dict(
     model=flow,
@@ -221,7 +227,7 @@ data_path_forecast = Path(
 
 
 trainer_kwargs = dict(
-    max_steps=100000,
+    max_steps=10000,
     accelerator="gpu",
     devices=N_GPUS,
     log_every_n_steps=100,
@@ -275,6 +281,7 @@ def main(rollout: bool = False, train: bool = True, ckpt: str = "last", data_pat
             train=train,
             ckpt=ckpt,
             massfixers=["scale"],  # [None, "scale"],
+            generate_kwargs=generate_kwargs,
         )
 
     else:
@@ -298,7 +305,8 @@ def main(rollout: bool = False, train: bool = True, ckpt: str = "last", data_pat
                 filename="Epoch={epoch}-Step={step}-LossVal={Loss/Val_singlestep:.6f}",
                 auto_insert_metric_name=False,
                 every_n_epochs=1,
-            )
+            ),
+            generate_kwargs=generate_kwargs,
         )
 
 
@@ -321,6 +329,6 @@ if __name__ == "__main__":
 # execute via:
 # CUDA_VISIBLE_DEVICES=7 python3 -u
 # /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/
-# flowmatching_20251001_dev_longrun/train.py
+# flowmatching_firstrun_20251007_dev/train.py
 # or:
-# sbatch train.slurm (check: squeue -u jgross)
+# sbatch {path}/train.slurm (check: squeue -u jgross)
