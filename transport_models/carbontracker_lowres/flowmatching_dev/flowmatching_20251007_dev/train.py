@@ -154,6 +154,7 @@ generate_kwargs = dict(
     n_samples=100,
     masking=True,
     pattern="vertical",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "sattelite",
+    obs_fraction=0.2,  # if masking=True: [0, 1]
     noise=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
     analyze_noise=False,
 )
