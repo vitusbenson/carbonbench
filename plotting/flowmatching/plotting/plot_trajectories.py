@@ -144,7 +144,7 @@ if __name__ == "__main__":
         samples = xr.open_dataset(args.samples_path)
 
     fig = plot_trajectories(
-        samples.trajectory,
+        traj=samples.trajectory,
         n_samples=args.n_samples,
         sample_indices=None,
         level_idx=args.level_idx,

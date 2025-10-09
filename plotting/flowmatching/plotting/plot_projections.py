@@ -1,10 +1,11 @@
-"""Plot selected/random trajectory samples at the last time step."""
+"""Plot CO₂ trajectory samples on map projections."""
 
 import argparse
 import contextlib
 import sys
 from pathlib import Path
 
+import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -16,24 +17,28 @@ sns.color_palette("crest", as_cmap=True)
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[3]))
     from carbonbench.plotting.flowmatching.utilities.cmaps import get_cmap_list
-    from carbonbench.plotting.flowmatching.utilities.plot_utils import save_figure
+    from carbonbench.plotting.flowmatching.utilities.plot_utils import decorate_earth, parse_projections, PROJECTION_MAP, save_figure
 else:
     from .utilities.cmaps import get_cmap_list
-    from .utilities.plot_utils import save_figure
+    from .utilities.plot_utils import decorate_earth, parse_projections, PROJECTION_MAP, save_figure
 
 
-def plot_samples(
-    traj: xr.DataArray,
-    n_samples: int = 2,
-    ncol: int = 2,
+def plot_samples_projection(
+    traj,
+    projection=None,
+    terrain=False,
+    grid=False,
+    land=False, ocean=False, borders=False, lakes=False, rivers=False,
+    n_samples=2,
+    ncol=2,
     sample_indices=None,
-    level_idx: int = 0,
+    level_idx=0,
     cmaps=None,
-    seed: int = 42,
+    seed=7,
     figsize=None,
-    title: str = "Samples",
+    title="Sample Projections",
 ):
-    """Plot selected/random samples at the last time step."""
+    """Plot selected/random samples at the last time step on a global projection."""
 
     for dim in ("sample", "time", "lat", "lon"):
         if dim not in traj.dims:
@@ -55,30 +60,58 @@ def plot_samples(
     elif len(cmaps) < n_samples:
         cmaps = cmaps + ["bone_r"] * (n_samples - len(cmaps))
 
+    if projection is None:
+        projections = [ccrs.PlateCarree()] * n_samples
+    elif isinstance(projection, list):
+        if len(projection) < n_samples:
+            projections = projection + [projection[-1]] * (n_samples - len(projection))
+        else:
+            projections = projection[:n_samples]
+    else:
+        projections = [projection] * n_samples
+
     last_time = traj.sizes["time"] - 1
 
     nrow = int(np.ceil(n_samples / ncol))
     aspect = traj.sizes["lat"] / traj.sizes["lon"]
-    panel_width = 6.0
+    panel_width = 8.0
     panel_height = panel_width * aspect
     if figsize is None:
         figsize = (panel_width * ncol, (panel_height + 0.6) * nrow)
 
-    fig, axes = plt.subplots(nrow, ncol, figsize=figsize, squeeze=False)
+    fig, axes = plt.subplots(
+        nrow, ncol,
+        figsize=figsize,
+        subplot_kw={"projection": ccrs.PlateCarree()},
+        squeeze=False
+    )
     axes_flat = axes.ravel()
 
-    for i, (sample_idx, cmap) in enumerate(zip(sample_indices, cmaps)):
-        ax = axes_flat[i]
+    for i, (sample_idx, cmap, proj) in enumerate(zip(sample_indices, cmaps, projections)):
+        ax = fig.add_subplot(axes_flat[i].get_subplotspec(), projection=proj)
+        axes_flat[i].remove()  # remove placeholder
+
         da_sample = traj.isel(sample=sample_idx, level=level_idx, time=last_time)
         with contextlib.suppress(Exception):
             da_sample = da_sample.compute()
 
-        mappable = da_sample.plot(ax=ax, cmap=cmap, add_colorbar=False, add_labels=False, rasterized=True)
-        ax.set_aspect("equal", adjustable="box")
-        ax.set_title(f"Sample {sample_idx}", fontsize=12, fontweight="bold")
+        decorate_earth(
+            ax,
+            terrain=terrain,
+            grid=grid,
+            land=land, ocean=ocean, borders=borders, lakes=lakes, rivers=rivers
+        )
+
+        mapable = da_sample.plot(
+            ax=ax, cmap=cmap, add_colorbar=False, add_labels=False,
+            transform=ccrs.PlateCarree(), rasterized=True
+        )
+
+        ax.set_title(f"Sample {sample_idx}, {proj.__class__.__name__}", fontsize=12, fontweight="bold")
         ax.set_xlabel("")
         ax.set_ylabel("")
-        cbar = fig.colorbar(mappable, ax=ax, fraction=0.025, pad=0.04)
+
+        cbar = fig.colorbar(mapable, ax=ax, fraction=0.025, pad=0.04)
         cbar.ax.set_ylabel("CO₂ (normalized)", rotation=270, labelpad=15)
 
     for j in range(len(sample_indices), len(axes_flat)):
@@ -86,32 +119,43 @@ def plot_samples(
 
     plt.tight_layout()
     if title:
-        fig.suptitle(title, fontsize=16, fontweight="bold")
-
-    return fig, axes
+        fig.suptitle(title, fontsize=18, fontweight="bold")
+    return fig
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Plot trajectory samples at the last time step.")
+    parser = argparse.ArgumentParser(description="Plot CO₂ trajectory samples on map projections.")
     parser.add_argument("--samples_path", type=str, required=True, help="Path to .zarr or .nc file containing samples.")
     parser.add_argument("--out_dir", type=str, required=True, help="Output directory for saved plots.")
     parser.add_argument("--use_selected", action="store_true", help="Use the full cmap_selected list instead of default_cmap.")
     parser.add_argument("--use_ipcc", action="store_true", help="Use IPCC colormaps instead of default or selected.")
-    parser.add_argument("--n_samples", type=int, default=2, help="Number of samples to plot.")
+    parser.add_argument("--n_samples", type=int, default=4, help="Number of trajectory samples to plot.")
     parser.add_argument("--level_idx", type=int, default=0, help="Level index to plot.")
     parser.add_argument("--ncol", type=int, default=2, help="Number of columns in subplot grid.")
+    parser.add_argument("--projections", nargs="*", default=["PlateCarree"],
+                        help=f"List of projections. Available: {', '.join(PROJECTION_MAP.keys())}"
+    )
     args = parser.parse_args()
 
     path = Path(args.samples_path)
     samples = xr.open_zarr(path) if path.suffix == ".zarr" else xr.open_dataset(path)
 
-    fig, _ = plot_samples(
+    cmaps = get_cmap_list(args.use_ipcc, args.use_selected)
+    cmaps = cmaps[:args.n_samples]
+
+    projections = parse_projections(args.projections)
+
+    fig = plot_samples_projection(
         samples.trajectory,
+        projection=projections,
+        terrain=False,
+        grid=True,
+        land=False, ocean=False, borders=False, lakes=False, rivers=False,
         n_samples=args.n_samples,
         ncol=args.ncol,
         level_idx=args.level_idx,
-        cmaps=get_cmap_list(args.use_ipcc, args.use_selected),
-        title="Samples",
+        cmaps=cmaps,
+        title="CO₂ Projection Samples"
     )
 
-    save_figure(fig, args.out_dir, "samples", imgformats=["pdf"])
+    save_figure(fig, args.out_dir, "samples_projection", imgformats=["pdf"])

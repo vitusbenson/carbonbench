@@ -1,5 +1,5 @@
 """
-! -> masking included
+! -> masking and evaluation plots for inference included
 
 Training and evaluation script for Flow Matching models on given data.
 
