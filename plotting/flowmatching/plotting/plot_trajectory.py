@@ -19,8 +19,8 @@ if __package__ is None or __package__ == "":
     from carbonbench.plotting.flowmatching.utilities.cmaps import get_cmap_list
     from carbonbench.plotting.flowmatching.utilities.plot_utils import decorate_earth, parse_projections, PROJECTION_MAP, normalize_minmax, save_figure
 else:
-    from .utilities.cmaps import get_cmap_list
-    from .utilities.plot_utils import decorate_earth, parse_projections, PROJECTION_MAP, normalize_minmax, save_figure
+    from ..utilities.cmaps import get_cmap_list
+    from ..utilities.plot_utils import decorate_earth, parse_projections, PROJECTION_MAP, normalize_minmax, save_figure
 
 
 def plot_trajectory_timeseries(

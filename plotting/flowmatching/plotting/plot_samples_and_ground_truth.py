@@ -24,8 +24,8 @@ if __package__ is None or __package__ == "":
         parse_projections, PROJECTION_MAP, save_figure
     )
 else:
-    from .utilities.cmaps import get_cmap_list
-    from .utilities.plot_utils import (
+    from ..utilities.cmaps import get_cmap_list
+    from ..utilities.plot_utils import (
         decorate_earth, load_carbontracker_tests, normalize_minmax, normalize_tests,
         parse_projections, PROJECTION_MAP, save_figure
     )

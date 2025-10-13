@@ -23,8 +23,8 @@ if __package__ is None or __package__ == "":
         save_figure,
     )
 else:
-    from .utilities.cmaps import get_cmap_list
-    from .utilities.plot_utils import mpl_rc_params, save_figure
+    from ..utilities.cmaps import get_cmap_list
+    from ..utilities.plot_utils import mpl_rc_params, save_figure
 
 
 def plot_cmaps(samples: xr.Dataset, cmap_list: list[str] | None = None, n_col: int = 2):

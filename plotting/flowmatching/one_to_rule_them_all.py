@@ -173,4 +173,4 @@ if __name__ == "__main__":
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
     one_to_rule_them_all(args)
 
-# python /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/plotting/flowmatching/one_to_rule_them_all.py --samples_path /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/flowmatching_20251006_dev/singlestep/preds/ckpt=best_massfixer=default/co2_pred_rollout_QS.zarr --out_dir /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/plotting/plots/test --use_ipcc --bias_hidden
+# python /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/plotting/flowmatching/one_to_rule_them_all.py --samples_path /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/flowmatching_20251010_2_dev/singlestep/preds/ckpt=best_massfixer=default/co2_pred_rollout_QS.zarr --out_dir /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/plotting/flowmatching/plots/20251010_2/ --use_ipcc --bias_hidden

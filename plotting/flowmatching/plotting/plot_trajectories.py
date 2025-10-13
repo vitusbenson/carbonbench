@@ -15,8 +15,8 @@ if __package__ is None or __package__ == "":
     from carbonbench.plotting.flowmatching.utilities.cmaps import get_cmap_list
     from carbonbench.plotting.flowmatching.utilities.plot_utils import save_figure
 else:
-    from .utilities.cmaps import get_cmap_list
-    from .utilities.plot_utils import save_figure
+    from ..utilities.cmaps import get_cmap_list
+    from ..utilities.plot_utils import save_figure
 
 sns.set_theme()  # Optional, for consistent style
 sns.color_palette("crest", as_cmap=True)
