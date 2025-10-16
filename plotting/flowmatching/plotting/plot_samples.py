@@ -97,6 +97,7 @@ if __name__ == "__main__":
     parser.add_argument("--out_dir", type=str, required=True, help="Output directory for saved plots.")
     parser.add_argument("--use_selected", action="store_true", help="Use the full cmap_selected list instead of default_cmap.")
     parser.add_argument("--use_ipcc", action="store_true", help="Use IPCC colormaps instead of default or selected.")
+    parser.add_argument("--use_ipcc_one", action="store_true", help="Use a single IPCC colormap.")
     parser.add_argument("--n_samples", type=int, default=2, help="Number of samples to plot.")
     parser.add_argument("--level_idx", type=int, default=0, help="Level index to plot.")
     parser.add_argument("--ncol", type=int, default=2, help="Number of columns in subplot grid.")
@@ -108,9 +109,10 @@ if __name__ == "__main__":
     fig, _ = plot_samples(
         traj=samples.trajectory,
         n_samples=args.n_samples,
+        sample_indices=list(range(args.n_samples)),
         ncol=args.ncol,
         level_idx=args.level_idx,
-        cmaps=get_cmap_list(args.use_ipcc, args.use_selected),
+        cmaps=get_cmap_list(args.use_ipcc, args.use_ipcc_one, args.use_selected, n_samples=args.n_samples),
         title="Samples",
     )
 

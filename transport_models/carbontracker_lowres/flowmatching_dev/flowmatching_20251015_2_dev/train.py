@@ -1,5 +1,6 @@
 """
-! -> unet_S_tsaf_specloss
+! -> conditional generation evaluation added: scatter_preds_vs_tests, spread_skill, error_locations
+avg_over_levels=False
 
 Training and evaluation script for Flow Matching models on given data.
 
@@ -150,18 +151,26 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
 
 flow = MODELWRAPPERS["flowmatching"](**wrapper_kwargs)
 
+generate_kwargs = dict(
+    n_samples=100,
+    masking=True,
+    pattern="vertical",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "sattelite",
+    analyze_masking=True,
+    obs_fraction=0.3,  # if masking=True: [0, 1]
+    noise=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
+    analyze_noise=False,
+    avg_over_levels=False,
+)
+
 lit_module_kwargs = dict(
     model=flow,
     model_kwargs=wrapper_kwargs["model_kwargs"],
-    loss="mse",
-    loss_kwargs=dict(
-        weights=LOSS_WEIGHTS, spectral_power_weight=0.0, nlat=len(lat), nlon=len(lon), normalize_batch=True,
-    ),
+    loss="flowmatching_mse",
+    loss_kwargs=dict(),
     metrics=[
         dict(name=m, kwargs=dict(weights=METRIC_WEIGHTS))
         for m in ["rmse", "r2", "nse", "rabsbias", "rrmse"]
-    ],
-    # + [dict(name="mass_rmsev2", kwargs=dict(molecule=m)) for m in ["co2"]],
+    ], # + [dict(name="mass_rmsev2", kwargs=dict(molecule=m)) for m in ["co2"]],
     no_grad_step_shedule=None,
     lr=1e-3,
     weight_decay=0.1,
@@ -232,8 +241,7 @@ trainer_kwargs = dict(
         "auto"
         if N_GPUS == 1
         else pl.strategies.DDPStrategy(find_unused_parameters=False)
-    ), # profiler="simple", fast_dev_run=True,
-    # overfit_batches=10, # for debugging only!!
+    ), # profiler="simple", fast_dev_run=True, # overfit_batches=10, # for debugging only!!
 )
 
 rollout_trainer_kwargs = dict(
@@ -277,6 +285,7 @@ def main(rollout: bool = False, train: bool = True, ckpt: str = "last", data_pat
             train=train,
             ckpt=ckpt,
             massfixers=["scale"],  # [None, "scale"],
+            generate_kwargs=generate_kwargs,
         )
 
     else:
@@ -300,7 +309,8 @@ def main(rollout: bool = False, train: bool = True, ckpt: str = "last", data_pat
                 filename="Epoch={epoch}-Step={step}-LossVal={Loss/Val_singlestep:.6f}",
                 auto_insert_metric_name=False,
                 every_n_epochs=1,
-            )
+            ),
+            generate_kwargs=generate_kwargs,
         )
 
 
@@ -321,6 +331,8 @@ if __name__ == "__main__":
     )
 
 # execute via:
-# CUDA_VISIBLE_DEVICES=7 python3 -u /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/flowmatching_firstrun_20250730_dev/train.py
+# CUDA_VISIBLE_DEVICES=7 python3 -u
+# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/
+# flowmatching_firstrun_20251007_dev/train.py
 # or:
-# sbatch train.slurm (check: squeue -u jgross)
+# sbatch {path}/train.slurm (check: squeue -u jgross)
