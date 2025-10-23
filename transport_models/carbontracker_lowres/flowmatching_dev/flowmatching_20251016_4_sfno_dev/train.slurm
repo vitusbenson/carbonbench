@@ -39,7 +39,7 @@ done
 OUT_DIR=/Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/flowmatching_20251016_4_sfno_dev
 
 # Run model in prediction-only mode
-srun python3 -u $OUT_DIR/train.py --data_path $LOCAL_DIR # --rollout, --ckpt "best", --only_pred
+srun python3 -u $OUT_DIR/train.py --data_path $LOCAL_DIR --only_pred # --rollout, --ckpt "best",
 
 # Clean up scratch
 rm -rf $LOCAL_DIR

@@ -64,8 +64,9 @@ def plot_samples_and_ground_truth(
         sample_indices = list(sample_indices)[:n_samples]
     else:
         rng = np.random.default_rng(seed)
-        sample_indices = list(rng.choice(min(traj.sizes["sample"], B),
-                                         size=n_samples, replace=False))
+        n_available = min(traj.sizes["sample"], B)
+        n_draw = min(n_samples, n_available)
+        sample_indices = list(rng.choice(n_available, size=n_draw, replace=False))
 
     nrow, ncol = n_samples, 2
     aspect = lat / lon

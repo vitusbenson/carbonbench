@@ -1,5 +1,5 @@
 """
-! -> sfno_S_tsaf_specloss
+! -> hyperparameter tuning with optuna. masking=True, noise=None <- !
 
 Training and evaluation script for Flow Matching models on given data.
 
@@ -19,6 +19,7 @@ Typical usage:
 
 #!usr/bin/python
 
+import copy
 from pathlib import Path
 
 import numpy as np
@@ -34,6 +35,7 @@ from neural_transport.datasets.grids import (
 from neural_transport.datasets.vars import *  # noqa: F403
 
 # neural_transport
+from neural_transport.models.wrappers_registry import MODELWRAPPERS
 from neural_transport.training import train_and_eval_rollout, train_and_eval_singlestep
 
 torch.set_float32_matmul_precision("high")
@@ -100,11 +102,11 @@ METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in TARGET_VARS}
 
 
 MODEL_DIMS = {
-    "XS": dict(embed_dim=64, num_layers=4),
-    "S": dict(embed_dim=128, num_layers=4),
-    "M": dict(embed_dim=128, num_layers=8),
-    "L": dict(embed_dim=256, num_layers=8),
-    "XL": dict(embed_dim=256, num_layers=12),
+    "XS": dict(embed_dim=64),
+    "S": dict(embed_dim=128),
+    "M": dict(embed_dim=256),
+    "L": dict(embed_dim=512),
+    "XL": dict(embed_dim=1024),
 }
 
 MODEL_SIZE = "S"
@@ -124,17 +126,20 @@ regulargrid_kwargs = dict( # for RegularGridModel
 wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
     **regulargrid_kwargs,
     model_kwargs=dict( # for FlowMatching
-        submodel="sfno",
-        model_kwargs=dict( # for RegularGridModel (sfno)
+        submodel="unet",
+        model_kwargs=dict( # for RegularGridModel (UNet)
             **regulargrid_kwargs,
-            model_kwargs=dict( # for sfno
-                embed_dim=MODEL_DIMS[MODEL_SIZE]["embed_dim"],
-                num_layers=MODEL_DIMS[MODEL_SIZE]["num_layers"],
-                scale_factor=1,
+            model_kwargs=dict( # for UNet
                 in_chans=LEN_ALL_VARS + 1, # + 1 for flow_time
                 out_chans=LEN_ALL_TARGET_VARS,
-                normalization_layer="instance_norm",
-                rank=1,
+                embed_dim=MODEL_DIMS[MODEL_SIZE]["embed_dim"],
+                act="leakyrelu",
+                norm="batch",
+                enc_filters=[[7], [3, 3], [3, 3], [3, 3]],
+                dec_filters=[[3, 3], [3, 3], [3, 3], [3, 3]],
+                in_interpolation="bilinear",
+                out_interpolation="nearest-exact",
+                out_clip=None,
             ),
         ),
         return_intermediates=True,
@@ -144,20 +149,23 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
     ),
 )
 
+flow = MODELWRAPPERS["flowmatching"](**wrapper_kwargs)
+
 generate_kwargs = dict(
     n_samples=100,
     masking=True,
     pattern="vertical",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite",
     analyze_masking=True,
     obs_fraction=0.3,  # if masking=True: [0, 1]
-    noise=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
+    noise=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise",
+    # "geodesic_noise", "linear_noise", "antipodal_orthogonal_noise"
     analyze_noise=False,
     avg_over_levels=True,
 )
 
 lit_module_kwargs = dict(
-    model="flowmatching",
-    model_kwargs=wrapper_kwargs,
+    model=flow,
+    model_kwargs=wrapper_kwargs["model_kwargs"],
     loss="flowmatching_mse",
     loss_kwargs=dict(),
     metrics=[
@@ -254,18 +262,36 @@ rollout_trainer_kwargs = dict(
 obs_compare_path = f"/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/obs_carbontracker_{grid}_{vertical_levels}_{freq}.zarr"  # noqa: E501
 
 
-def main(rollout: bool = False, train: bool = True, ckpt: str = "last", data_path: str|None = None) -> None:
+def main(
+        rollout: bool = False,
+        train: bool = True,
+        ckpt: str = "last",
+        data_path: str|None = None,
+        data_kwargs: dict|None = None,
+        lit_module_kwargs: dict|None = None,
+        trainer_kwargs: dict|None = None,
+        wrapper_kwargs: dict|None = None,
+        run_dir: Path|None = None,
+    ) -> None:
     """Main function to run the training or rollout evaluation."""
-    run_dir = Path(__file__).resolve().parent
+    wrapper_args = copy.deepcopy(wrapper_kwargs or globals().get("wrapper_kwargs"))
+    lit_args = copy.deepcopy(lit_module_kwargs or globals().get("lit_module_kwargs"))
+    trainer_args = copy.deepcopy(trainer_kwargs or globals().get("trainer_kwargs"))
+    data_args = copy.deepcopy(data_kwargs or globals().get("data_kwargs"))
+
+    run_dir = run_dir or Path(__file__).resolve().parent
+
+    flow = MODELWRAPPERS["flowmatching"](**wrapper_args)
+    lit_args.update(dict(model=flow))
 
     if data_path is not None:
-        data_kwargs["data_path"] = data_path
+        data_args["data_path"] = data_path
 
     if rollout:
         train_and_eval_rollout(
             run_dir,
-            data_kwargs,
-            lit_module_kwargs,
+            data_args,
+            lit_args,
             rollout_trainer_kwargs,
             data_path_forecast,
             device="cuda",
@@ -284,9 +310,9 @@ def main(rollout: bool = False, train: bool = True, ckpt: str = "last", data_pat
     else:
         train_and_eval_singlestep(
             run_dir,
-            data_kwargs,
-            lit_module_kwargs,
-            trainer_kwargs,
+            data_args,
+            lit_args,
+            trainer_args,
             data_path_forecast,
             device="cuda",
             freq="QS",
