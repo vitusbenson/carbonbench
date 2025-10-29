@@ -1,4 +1,5 @@
 from pathlib import Path
+
 from ..ipcc_colormaps.colormaps_ipcc import load_ipcc_cmaps
 
 # ---- Colormap configuration ----

@@ -1,6 +1,10 @@
+"""Load IPCC colormaps (continuous and discrete) as ListedColormap objects."""
+
+from pathlib import Path
+
 import numpy as np
 from matplotlib.colors import ListedColormap
-from pathlib import Path
+
 
 def load_ipcc_cmaps(file_paths: list[str], discrete: bool = False) -> list[ListedColormap]:
     """

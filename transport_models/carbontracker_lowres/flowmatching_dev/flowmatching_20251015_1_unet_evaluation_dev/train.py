@@ -1,5 +1,5 @@
 """
-! -> conditional generation evaluation added: scatter_preds_vs_tests, spread_skill, error_locations
+! -> conditional generation evaluation added: scatter_preds_vs_tests, spread_skill, error_locations <- !.
 
 Training and evaluation script for Flow Matching models on given data.
 

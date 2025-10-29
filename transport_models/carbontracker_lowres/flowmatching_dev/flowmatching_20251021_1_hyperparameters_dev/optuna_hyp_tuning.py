@@ -1,3 +1,5 @@
+"""Tune hyperparameters using Optuna."""
+
 import copy
 import shutil
 from pathlib import Path
@@ -13,7 +15,7 @@ from train import MODEL_DIMS, data_kwargs, lit_module_kwargs, main, trainer_kwar
 # ---------------------------
 # TensorBoard helper
 # ---------------------------
-def get_last_val_loss(logdir: str, metric_name="Loss/Val_singlestep"):
+def get_last_val_loss(logdir: str, metric_name: str ="Loss/Val_singlestep") -> float:
     logdir = Path(logdir)
     event_files = list(logdir.glob("**/events.out.tfevents*"))
     if not event_files:

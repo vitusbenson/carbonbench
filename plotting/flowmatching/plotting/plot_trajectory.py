@@ -5,11 +5,11 @@ import sys
 from pathlib import Path
 
 import cartopy.crs as ccrs
-import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import xarray as xr
+from matplotlib import gridspec
 
 sns.set_theme()
 sns.color_palette("crest", as_cmap=True)
