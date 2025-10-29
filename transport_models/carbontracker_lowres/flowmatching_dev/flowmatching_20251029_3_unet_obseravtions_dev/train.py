@@ -1,5 +1,5 @@
 """
-! -> hyperparameter tuning with optuna. masking=True, noise=None, max_steps 2000, n_samples 20 for testing only <- !.
+! -> test new separation of concerns in computing score and plotting, got accidently observations <-!.
 
 Training and evaluation script for Flow Matching models on given data.
 
@@ -19,7 +19,6 @@ Typical usage:
 
 #!usr/bin/python
 
-import copy
 from pathlib import Path
 
 import numpy as np
@@ -149,24 +148,25 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
     ),
 )
 
+flow = MODELWRAPPERS["flowmatching"](**wrapper_kwargs)
+
 generate_kwargs = dict(
-    n_samples=20,
+    n_samples=100,
     masking=True,
-    pattern="vertical",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite",
+    pattern="satellite",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite",
     masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
     t_threshold=0.9,  # if masking_time is not None: [0, 1]
     masking_method="interpolate",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)",
-    refine_start=1.0,  # [0, 1], start refine integration steps, 1.0 for no refinement
+    refine_start=0.9,  # [0, 1], start refine integration steps, 1.0 for no refinement
     analyze_masking=True,
     obs_fraction=0.3,  # if masking=True: [0, 1]
-    noise=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise",
-    # "geodesic_noise", "linear_noise", "antipodal_orthogonal_noise"
+    noise=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
     analyze_noise=False,
-    avg_over_levels=True,
+    avg_over_samples=False,
 )
 
 lit_module_kwargs = dict(
-    model="flowmatching",
+    model=flow,
     model_kwargs=wrapper_kwargs["model_kwargs"],
     loss="flowmatching_mse",
     loss_kwargs=dict(),
@@ -264,36 +264,18 @@ rollout_trainer_kwargs = dict(
 obs_compare_path = f"/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/obs_carbontracker_{grid}_{vertical_levels}_{freq}.zarr"  # noqa: E501
 
 
-def main(
-        rollout: bool = False,
-        train: bool = True,
-        ckpt: str = "last",
-        data_path: str|None = None,
-        data_kwargs: dict|None = None,
-        lit_module_kwargs: dict|None = None,
-        trainer_kwargs: dict|None = None,
-        wrapper_kwargs: dict|None = None,
-        run_dir: Path|None = None,
-    ) -> None:
+def main(rollout: bool = False, train: bool = True, ckpt: str = "last", data_path: str|None = None) -> None:
     """Main function to run the training or rollout evaluation."""
-    wrapper_args = copy.deepcopy(wrapper_kwargs or globals().get("wrapper_kwargs"))
-    lit_args = copy.deepcopy(lit_module_kwargs or globals().get("lit_module_kwargs"))
-    trainer_args = copy.deepcopy(trainer_kwargs or globals().get("trainer_kwargs"))
-    data_args = copy.deepcopy(data_kwargs or globals().get("data_kwargs"))
-
-    run_dir = run_dir or Path(__file__).resolve().parent
-
-    flow = MODELWRAPPERS["flowmatching"](**wrapper_args)
-    lit_args.update(dict(model=flow))
+    run_dir = Path(__file__).resolve().parent
 
     if data_path is not None:
-        data_args["data_path"] = data_path
+        data_kwargs["data_path"] = data_path
 
     if rollout:
         train_and_eval_rollout(
             run_dir,
-            data_args,
-            lit_args,
+            data_kwargs,
+            lit_module_kwargs,
             rollout_trainer_kwargs,
             data_path_forecast,
             device="cuda",
@@ -312,9 +294,9 @@ def main(
     else:
         train_and_eval_singlestep(
             run_dir,
-            data_args,
-            lit_args,
-            trainer_args,
+            data_kwargs,
+            lit_module_kwargs,
+            trainer_kwargs,
             data_path_forecast,
             device="cuda",
             freq="QS",

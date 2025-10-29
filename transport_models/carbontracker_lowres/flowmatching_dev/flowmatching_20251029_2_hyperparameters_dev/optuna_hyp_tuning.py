@@ -16,6 +16,7 @@ from train import MODEL_DIMS, data_kwargs, lit_module_kwargs, main, trainer_kwar
 # ---------------------------
 
 def read_crps_from_scores(trial_logdir: Path) -> float:
+    """Read CRPS_ensemble_mean from CSV log file."""
     scalar = trial_logdir.glob("**/scores/**/metrics_global_scalars.csv")
     scalar_files = list(scalar)
     df = pd.read_csv(scalar_files[-1])
@@ -26,7 +27,8 @@ def read_crps_from_scores(trial_logdir: Path) -> float:
 # ---------------------------
 # Objective function
 # ---------------------------
-def objective(trial):
+def objective(trial: optuna.trial.Trial) -> float:
+    """Hyperparameter optimization objective function."""
     # ---------------------------
     # Per-trial copies of kwargs
     # ---------------------------
@@ -53,7 +55,9 @@ def objective(trial):
     # ---------------------------
     # Apply hyperparameters
     # ---------------------------
-    trial_wrapper_kwargs["model_kwargs"]["model_kwargs"]["model_kwargs"]["embed_dim"] = MODEL_DIMS[model_size]["embed_dim"]
+
+    unet_config = trial_wrapper_kwargs["model_kwargs"]["model_kwargs"]["model_kwargs"]
+    unet_config["embed_dim"] = MODEL_DIMS[model_size]["embed_dim"]
     trial_wrapper_kwargs["model_kwargs"]["step_size"] = step_size
     trial_wrapper_kwargs["model_kwargs"]["method"] = method
 
@@ -66,7 +70,7 @@ def objective(trial):
         max_lr=max_lr,
     )
 
-    trial_trainer_kwargs["max_steps"] = 100  # 2000 shorter for tuning
+    trial_trainer_kwargs["max_steps"] = 2000  # 2000 shorter for tuning
     trial_data_kwargs["batch_size_train"] = batch_size_train // 1  # N_GPUS = 1
 
     # ---------------------------
@@ -92,7 +96,7 @@ def objective(trial):
             data_kwargs=trial_data_kwargs,
             run_dir=trial_logdir,
         )
-    except Exception as e:
+    except (RuntimeError, FileNotFoundError, ValueError) as e:
         print(f"Trial {trial.number} failed: {e}")
         return float("inf")
 
@@ -106,11 +110,21 @@ def objective(trial):
 # ---------------------------
 if __name__ == "__main__":
     optuna.logging.set_verbosity(optuna.logging.INFO)  # track progress
+    out_dir = Path(__file__).resolve().parent
+    db_path = out_dir / "optuna_study.db"
+    storage = f"sqlite:///{db_path}"
 
-    study = optuna.create_study(direction="minimize")
+    study = optuna.create_study(
+        direction="minimize",
+        study_name="flowmatching_20251029_2_hyperparameters_dev",
+        storage=storage,
+        load_if_exists=True,
+    )
+
     study.optimize(objective, n_trials=20)
 
     print("Best hyperparameters:", study.best_params)
+    print("Best CRPS:", study.best_value)
 
     # ---------------------------
     # Visualize results
@@ -118,14 +132,15 @@ if __name__ == "__main__":
     fig1 = vis.plot_param_importances(study)
     fig2 = vis.plot_optimization_history(study)
     try:
-        fig1.write_image("optuna_param_importances.png")
-        fig2.write_image("optuna_optimization_history.png")
-    except Exception:
-        fig1.write_html("optuna_param_importances.html")
-        fig2.write_html("optuna_optimization_history.html")
+        fig1.write_image(out_dir / "optuna_param_importances.png")
+        fig2.write_image(out_dir / "optuna_optimization_history.png")
+    except (ValueError, RuntimeError, OSError, ImportError) as e:
+        print(f"Could not write static images ({e}), falling back to HTML.")
+        fig1.write_html(out_dir / "optuna_param_importances.html")
+        fig2.write_html(out_dir / "optuna_optimization_history.html")
     fig3 = vis_mat.plot_param_importances(study).figure
     fig4 = vis_mat.plot_optimization_history(study).figure
-    fig3.savefig("optuna_param_importances_matplotlib.png")
-    fig4.savefig("optuna_optimization_history_matplotlib.png")
+    fig3.savefig(out_dir / "optuna_param_importances_matplotlib.png")
+    fig4.savefig(out_dir / "optuna_optimization_history_matplotlib.png")
     plt.close(fig3)
     plt.close(fig4)

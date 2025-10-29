@@ -234,7 +234,7 @@ data_path_forecast = Path(
 
 
 trainer_kwargs = dict(
-    max_steps=100,
+    max_steps=10000,
     accelerator="gpu",
     devices=N_GPUS,
     log_every_n_steps=100,
