@@ -27,14 +27,13 @@ import pytorch_lightning as pl
 # torch
 import torch
 import xarray as xr
+
+# neural_transport
 from neural_transport.datasets.grids import (
     LATLON_PROTOTYPE_COORDS,
     VERTICAL_LAYERS_PROTOTYPE_COORDS,
 )
 from neural_transport.datasets.vars import *  # noqa: F403
-
-# neural_transport
-from neural_transport.models.wrappers_registry import MODELWRAPPERS
 from neural_transport.training import train_and_eval_rollout, train_and_eval_singlestep
 
 torch.set_float32_matmul_precision("high")
