@@ -3,8 +3,8 @@
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=64000
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=240000
 #SBATCH --job-name=OCO2MIP_create_dataset
 #SBATCH --mail-type=END
 #SBATCH -o /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data/OCO2MIP_create_dataset_%A.out
