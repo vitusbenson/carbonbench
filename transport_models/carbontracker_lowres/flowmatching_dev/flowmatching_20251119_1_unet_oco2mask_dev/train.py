@@ -39,7 +39,7 @@ from neural_transport.training import train_and_eval_rollout, train_and_eval_sin
 torch.set_float32_matmul_precision("high")
 pl.seed_everything(42)
 
-TARGET_VARS = ["co2massmix"]
+TARGET_VARS = ["xco2_2019_scale"]
 # Uncomment for conditional Flow Matching
 FORCING_VARS_1D = [
     # "flow_time"
@@ -85,18 +85,8 @@ ds_stats = xr.open_zarr(
     f"/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/train/carbontracker_{grid}_{vertical_levels}_{freq}_stats.zarr"
 ).compute()
 
-inv_std = {
-    k: 1
-    / (ds_stats[f"{k}_delta"].sel(stats="std").where(lambda x: x > 1e-14, 1).values)
-    ** 2
-    for k in TARGET_VARS  # CARBOSCOPE_CARBON3D_VARS
-}
 
-weights = {k: cos_lat * inv_std[k] for k in inv_std}
-
-LOSS_WEIGHTS = {k: (10 * v / LEN_ALL_TARGET_VARS) for k, v in weights.items()}
-
-METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in TARGET_VARS}
+METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in ["co2massmix"]}
 
 
 MODEL_DIMS = {
@@ -140,6 +130,7 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
                 out_clip=None,
             ),
         ),
+        generating=True,
         return_intermediates=True,
         method="midpoint",  # 'midpoint' or 'euler'
         nlev=nlev,
@@ -148,15 +139,15 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
 )
 
 generate_kwargs = dict(
-    n_samples=100,
+    n_samples=10,
     masking=True,
-    pattern="satellite",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite",
+    pattern="oco2",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite", "oco2"
     masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
     t_threshold=0.9,  # if masking_time is not None: [0, 1]
-    masking_method="interpolate",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)",
+    masking_method="total_column_average",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)", "total_column_average"
     refine_start=0.9,  # [0, 1], start refine integration steps, 1.0 for no refinement
     analyze_masking=True,
-    obs_fraction=0.3,  # if masking=True: [0, 1]
+    obs_fraction=0.3,  # if masking=True and pattern!="oco2": [0, 1]
     noise=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
     analyze_noise=False,
     avg_over_levels=False,
@@ -204,7 +195,7 @@ data_kwargs = dict(
     batch_size_pred=BATCH_SIZE_PRED,
     num_workers=32 * N_GPUS,
     val_rollout_n_timesteps=None,
-    target_vars=["co2massmix"], #, "airmass"
+    target_vars=["xco2_2019_scale"], #, "airmass"
     forcing_vars=[
         # "gph_bottom",
         # "gph_top",
@@ -226,7 +217,7 @@ data_kwargs = dict(
 )
 
 data_path_forecast = Path(
-    "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/OCO2MIP_OCO2/test/"
+    "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/OCO2MIP_OCO2/train/"
 )
 
 
