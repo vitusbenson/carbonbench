@@ -197,6 +197,7 @@ data_kwargs = dict(
     val_rollout_n_timesteps=None,
     target_vars=["xco2_2019_scale"], #, "airmass"
     forcing_vars=[
+        "xco2_averaging_kernel",
         # "gph_bottom",
         # "gph_top",
         # "p_bottom",
