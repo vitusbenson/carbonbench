@@ -198,6 +198,8 @@ data_kwargs = dict(
     target_vars=["xco2_2019_scale"], #, "airmass"
     forcing_vars=[
         "xco2_averaging_kernel",
+        # "xco2_apriori",
+        # "co2_profile_apriori",
         # "gph_bottom",
         # "gph_top",
         # "p_bottom",
