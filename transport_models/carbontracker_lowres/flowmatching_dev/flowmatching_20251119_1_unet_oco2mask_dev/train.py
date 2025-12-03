@@ -141,6 +141,7 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
 generate_kwargs = dict(
     n_samples=10,
     masking=True,
+    obs_var="xco2_2019_scale",
     pattern="oco2",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite", "oco2"
     masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
     t_threshold=0.9,  # if masking_time is not None: [0, 1]
@@ -198,8 +199,8 @@ data_kwargs = dict(
     target_vars=["xco2_2019_scale"], #, "airmass"
     forcing_vars=[
         "xco2_averaging_kernel",
-        # "xco2_apriori",
-        # "co2_profile_apriori",
+        "xco2_apriori",
+        "co2_profile_apriori",
         # "gph_bottom",
         # "gph_top",
         # "p_bottom",
