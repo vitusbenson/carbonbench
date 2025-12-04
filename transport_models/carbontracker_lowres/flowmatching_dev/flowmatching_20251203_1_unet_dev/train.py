@@ -1,5 +1,5 @@
 """
-! -> Masking with OCO-2 data <-!.
+! -> test whether pre oco2 masking pipeline is still working <-!.
 
 Training and evaluation script for Flow Matching models on given data.
 
@@ -85,8 +85,18 @@ ds_stats = xr.open_zarr(
     f"/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/train/carbontracker_{grid}_{vertical_levels}_{freq}_stats.zarr"
 ).compute()
 
+inv_std = {
+    k: 1
+    / (ds_stats[f"{k}_delta"].sel(stats="std").where(lambda x: x > 1e-14, 1).values)
+    ** 2
+    for k in TARGET_VARS  # CARBOSCOPE_CARBON3D_VARS
+}
 
-METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in ["co2massmix"]}
+weights = {k: cos_lat * inv_std[k] for k in inv_std}
+
+LOSS_WEIGHTS = {k: (10 * v / LEN_ALL_TARGET_VARS) for k, v in weights.items()}
+
+METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in TARGET_VARS}
 
 
 MODEL_DIMS = {
@@ -139,16 +149,15 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
 )
 
 generate_kwargs = dict(
-    n_samples=10,
+    n_samples=100,
     masking=True,
-    obs_var="xco2_2019_scale",
-    pattern="oco2",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite", "oco2"
+    pattern="satellite",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite",
     masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
     t_threshold=0.9,  # if masking_time is not None: [0, 1]
-    masking_method="total_column_average",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)", "total_column_average"
+    masking_method="interpolate",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)",
     refine_start=0.9,  # [0, 1], start refine integration steps, 1.0 for no refinement
     analyze_masking=True,
-    obs_fraction=0.3,  # if masking=True and pattern!="oco2": [0, 1]
+    obs_fraction=0.3,  # if masking=True: [0, 1]
     noise=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
     analyze_noise=False,
     avg_over_levels=False,
@@ -187,7 +196,7 @@ BATCH_SIZE_PRED = 32
 
 data_kwargs = dict(
     data_path="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker",
-    dataset="mip_oco2",
+    dataset="carbontracker",
     grid=grid,
     vertical_levels=vertical_levels,
     freq=freq,
@@ -196,11 +205,8 @@ data_kwargs = dict(
     batch_size_pred=BATCH_SIZE_PRED,
     num_workers=32 * N_GPUS,
     val_rollout_n_timesteps=None,
-    target_vars=["xco2_2019_scale"], #, "airmass"
+    target_vars=["co2massmix"], #, "airmass"
     forcing_vars=[
-        "xco2_averaging_kernel",
-        "xco2_apriori",
-        "co2_profile_apriori",
         # "gph_bottom",
         # "gph_top",
         # "p_bottom",
@@ -221,7 +227,7 @@ data_kwargs = dict(
 )
 
 data_path_forecast = Path(
-    "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/OCO2MIP_OCO2/train/"
+    "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/"
 )
 
 
