@@ -230,9 +230,9 @@ generate_kwargs = dict(
     data_path_generate="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/OCO2MIP_OCO2/train/",
     generate_data_kwargs=generate_data_kwargs,
     pattern="oco2",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite", "oco2"
-    masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
+    masking_time="step_late_masking",  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
     t_threshold=0.9,  # if masking_time is not None: [0, 1]
-    masking_method="total_column_average",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)", "total_column_average"
+    masking_method="total_column_average_mult",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)", "total_column_average_add", "total_column_average_mult", "total_column_average_test"
     refine_start=0.9,  # [0, 1], start refine integration steps, 1.0 for no refinement
     analyze_masking=True,
     obs_fraction=0.3,  # if masking=True and pattern!="oco2": [0, 1]
