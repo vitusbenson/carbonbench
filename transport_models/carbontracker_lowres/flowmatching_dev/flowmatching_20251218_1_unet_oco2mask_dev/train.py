@@ -1,5 +1,5 @@
 """
-! -> Masking with OCO-2 data <-!.
+! -> Masking with OCO-2 setup test cases <-!.
 
 Training and evaluation script for Flow Matching models on given data.
 
