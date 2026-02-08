@@ -174,5 +174,11 @@ events.out.tfevents.*
 *.csv
 *hparams.yaml
 
+# IDE
+.vscode/
+
+# Databases
+*.db
+
 # Plots generated (Jonathan)
 transport_models/carbontracker_lowres/flowmatching_dev/**/*.html
