@@ -134,7 +134,7 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
         return_intermediates=True,
         method="midpoint",  # 'midpoint' or 'euler'
         nlev=nlev,
-        step_size=None,  # refine_start creates time_grid which replaces step_size
+        step_size=0.1,  # None here: refine_start creates time_grid which replaces step_size (at least theoretical, but not working well)
     ),
 )
 
@@ -230,10 +230,10 @@ generate_kwargs = dict(
     data_path_generate="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/OCO2MIP_OCO2/train/",
     generate_data_kwargs=generate_data_kwargs,
     pattern="oco2",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite", "oco2"
-    window_hours=72,  # hours of observation window for "oco2" pattern
-    masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
+    window_hours=6,  # hours of observation window for "oco2" pattern
+    masking_time="step_late_masking",  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
     t_threshold=0.9,  # if masking_time is not None: [0, 1]
-    masking_method="total_column_average_simple_unitary",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)", "total_column_average_add", "total_column_average_mult", "total_column_average_test"
+    masking_method="interpolate",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)", "total_column_average_add", "total_column_average_mult", "total_column_average_test"
     refine_start=0.9,  # [0, 1], start refine integration steps, 1.0 for no refinement
     steps=11,  # creates number of integration steps during generation
     analyze_masking=True,

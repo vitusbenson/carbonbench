@@ -19,9 +19,11 @@ printenv
 
 # Set variables
 SAVE_DIR="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/"
-GRIDNAME="latlon5.625"
-VERTICAL_LEVELS="l10"
-FREQ="6h"
+GRIDNAME="latlon5.625" # "latlon5.625" or "latlon2.8125" or "latlon2x3"
+VERTICAL_LEVELS="l10"  # "l3" or "l10" or "l20" or "l34"
+FREQ="6h"  # "3h" or "6h"
+
+echo "Gridname: $GRIDNAME, Vertical Levels: $VERTICAL_LEVELS, Frequency: $FREQ"
 
 SCRIPT_DIR=/Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data
 

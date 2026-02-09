@@ -241,7 +241,7 @@ generate_kwargs = dict(
     generate_data_kwargs=generate_data_kwargs,
     pattern="oco2",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite",
     window_hours=6,  # hours of observation window for "oco2" pattern
-    masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
+    masking_time="step_late_masking",  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
     t_threshold=0.9,  # if masking_time is not None: [0, 1]
     masking_method="interpolate",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)",
     refine_start=0.9,  # [0, 1], start refine integration steps, 1.0 for no refinement
