@@ -23,6 +23,8 @@ GRIDNAME="latlon5.625"
 VERTICAL_LEVELS="l10"
 FREQ="6h"
 
+echo "Gridname: $GRIDNAME, Vertical Levels: $VERTICAL_LEVELS, Frequency: $FREQ"
+
 SCRIPT_DIR=/Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data
 
 # Run the pipeline
