@@ -141,8 +141,8 @@ lit_module_kwargs = dict(
 )
 
 N_GPUS = 1
-BATCH_SIZE_TRAIN = 64
-BATCH_SIZE_PRED = 32
+BATCH_SIZE_TRAIN = 24  # 64
+BATCH_SIZE_PRED = 12  # 32
 
 data_kwargs = dict(
     data_path="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker",

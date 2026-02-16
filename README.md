@@ -1,4 +1,4 @@
-# CarbonBench
+![#](https://raw.githubusercontent.com/vitusbenson/carbonbench/main/carbonbench_logo.png)
 
 
 *A model intercomparison of neural network emulators for atmospheric transport.*
@@ -6,6 +6,9 @@
 
 <a href="https://opensource.org/licenses/MIT" target="_blank">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
+</a>
+<a href="https://ai4carbon.github.io/datasets/carbonbench/" target="_blank">
+    <img src="https://img.shields.io/badge/Documentation-018EF5?logo=readme&logoColor=fff" alt="Documentation">
 </a>
 <a href="https://twitter.com/vitusbenson" target="_blank">
     <img src="https://img.shields.io/twitter/follow/vitusbenson?style=social" alt="Twitter">
@@ -16,6 +19,16 @@
 <a href="https://arxiv.org/abs/2408.11032" target="_blank">
     <img src="https://img.shields.io/badge/arXiv-2408.11032-b31b1b.svg" alt="ArXiv">
 </a>
+
+## Downloading CarbonBench from Huggingface
+
+You can download a standard version of CarbonBench from huggingface:
+
+```
+python data/download_from_huggingface.py --download-all --local-dir path_to_store_data
+```
+
+> Then you should continue with preparing the ObsPack data - this you can unfortunately not download from Huggingface for licensing reasons.
 
 ## Building CarbonBench Dataset
 
@@ -99,12 +112,14 @@ In case you use CarbonBench in your research or work, it would be highly appreci
 ```bibtex
 @article{benson2024neuraltransport,
   title = {Atmospheric Transport Modeling of CO2 with Neural Networks},
-  author = {Vitus Benson, Ana Bastos, Christian Reimers, Alexander J. Winkler,
- Fanny Yang and Markus Reichstein},
-  eprint={2408.11032},
-  archivePrefix={arXiv},
-  primaryClass={cs.LG},
-  url={https://arxiv.org/abs/2408.11032}, 
+  author = {Benson, Vitus and Bastos, Ana and Reimers, Christian and Winkler, Alexander J. and Yang, Fanny and Reichstein, Markus},
+  year = {2025},
+  pages = {e2024MS004655},
+  journal = {Journal of Advances in Modeling Earth Systems},
+  volume = {17},
+  number = {2},
+  publisher = {Wiley Online Library},
+  url = {https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2024MS004655},
 }
 ```
 
