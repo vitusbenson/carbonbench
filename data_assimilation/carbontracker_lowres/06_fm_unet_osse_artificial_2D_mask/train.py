@@ -1,5 +1,7 @@
 """
-! -> Diffusion Posterior Sampling added <-!.
+! -> Masking with OCO-2 setup but Carbontracker data <-!.
+
+(flowmatching_20251209_1_unet_oco2mask_ct_dev)
 
 Training and evaluation script for Flow Matching models on given data.
 
@@ -27,13 +29,13 @@ import pytorch_lightning as pl
 # torch
 import torch
 import xarray as xr
-
-# neural_transport
 from neural_transport.datasets.grids import (
     LATLON_PROTOTYPE_COORDS,
     VERTICAL_LAYERS_PROTOTYPE_COORDS,
 )
 from neural_transport.datasets.vars import *  # noqa: F403
+
+# neural_transport
 from neural_transport.training import train_and_eval_rollout, train_and_eval_singlestep
 
 torch.set_float32_matmul_precision("high")
@@ -86,7 +88,7 @@ ds_stats = xr.open_zarr(
 ).compute()
 
 
-METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in TARGET_VARS}
+METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in ["co2massmix"]}
 
 
 MODEL_DIMS = {
@@ -134,7 +136,7 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
         return_intermediates=True,
         method="midpoint",  # 'midpoint' or 'euler'
         nlev=nlev,
-        step_size=0.2,
+        step_size=0.1,
     ),
 )
 
@@ -148,10 +150,10 @@ lit_module_kwargs = dict(
         for m in ["rmse", "r2", "nse", "rabsbias", "rrmse"]
     ], # + [dict(name="mass_rmsev2", kwargs=dict(molecule=m)) for m in ["co2"]],
     no_grad_step_shedule=None,
-    lr=3e-3,
-    weight_decay=0.0,
+    lr=1e-3,
+    weight_decay=0.1,
     lr_shedule_kwargs=dict(
-        warmup_steps=5000, halfcosine_steps=80000, min_lr=1.448612222179744e-07, max_lr=0.8001606601982787
+        warmup_steps=1000, halfcosine_steps=99000, min_lr=3e-7, max_lr=1.0
     ),
     val_dataloader_names=["singlestep"],
     plot_kwargs=dict(
@@ -212,23 +214,17 @@ generate_kwargs = dict(
     masking=True,
     data_path_generate="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/train/",
     generate_data_kwargs=generate_data_kwargs,
-    pattern="vertical",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite",
-    masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
-    t_threshold=0.9,  # if masking_time is not None: [0, 1]
-    masking_method="interpolate",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)",
-    use_dps_guidance=True,
-    guidance_scale=1.0,
-    guidance_start_t=0.0,  # [0, 1], start guidance integration steps, 1.0 for no guidance
-    guidance_end_t=1.0,  # [0, 1], end guidance integration steps, 0.0 for no guidance
-    guidance_loss_type="mse",  # 'mse' or 'l1'
+    pattern="vertical",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite", "oco2"
+    masking_time="step_early_masking",  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
+    t_threshold=0.3,  # if masking_time is not None: [0, 1]
+    masking_method="total_column_average_simple",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)", "total_column_average_add", "total_column_average_mult", "total_column_average_test"
     refine_start=0.9,  # [0, 1], start refine integration steps, 1.0 for no refinement
     analyze_masking=True,
-    obs_fraction=0.3,  # if masking=True: [0, 1]
+    obs_fraction=0.3,  # if masking=True and pattern!="oco2": [0, 1]
     noise_pattern=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
     analyze_noise=False,
     avg_over_levels=False,
 )
-
 
 trainer_kwargs = dict(
     max_steps=10000,
@@ -332,7 +328,7 @@ if __name__ == "__main__":
 
 # execute via:
 # CUDA_VISIBLE_DEVICES=7 python3 -u
-# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/
-# flowmatching_20251030_1_unet_baseline_dev/train.py
+# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/
+# 06_fm_unet_osse_artificial_2D_mask/train.py
 # or:
-# sbatch {path}/train.slurm (check: squeue -u jgross)
+# sbatch {path}/train.slurm (check: squeue -u <username>)

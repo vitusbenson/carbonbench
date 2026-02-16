@@ -1,5 +1,7 @@
 """
-! -> Full DPS + real OCO-2 data with total_column_average_simple masking <-!.
+! -> swintransformer_S_p1w4_tsaf_specloss <-!.
+
+(flowmatching_20251016_3_swin_dev)
 
 Training and evaluation script for Flow Matching models on given data.
 
@@ -34,6 +36,7 @@ from neural_transport.datasets.grids import (
 from neural_transport.datasets.vars import *  # noqa: F403
 
 # neural_transport
+from neural_transport.models.wrappers_registry import MODELWRAPPERS
 from neural_transport.training import train_and_eval_rollout, train_and_eval_singlestep
 
 torch.set_float32_matmul_precision("high")
@@ -85,16 +88,26 @@ ds_stats = xr.open_zarr(
     f"/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/train/carbontracker_{grid}_{vertical_levels}_{freq}_stats.zarr"
 ).compute()
 
+inv_std = {
+    k: 1
+    / (ds_stats[f"{k}_delta"].sel(stats="std").where(lambda x: x > 1e-14, 1).values)
+    ** 2
+    for k in TARGET_VARS  # CARBOSCOPE_CARBON3D_VARS
+}
 
-METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in ["co2massmix"]}
+weights = {k: cos_lat * inv_std[k] for k in inv_std}
+
+LOSS_WEIGHTS = {k: (10 * v / LEN_ALL_TARGET_VARS) for k, v in weights.items()}
+
+METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in TARGET_VARS}
 
 
 MODEL_DIMS = {
-    "XS": dict(embed_dim=64),
-    "S": dict(embed_dim=128),
-    "M": dict(embed_dim=256),
-    "L": dict(embed_dim=512),
-    "XL": dict(embed_dim=1024),
+    "XS": dict(embed_dim=256, depth=8),
+    "S": dict(embed_dim=512, depth=12),
+    "M": dict(embed_dim=768, depth=12),
+    "L": dict(embed_dim=768, depth=24),
+    "XL": dict(embed_dim=1024, depth=24),
 }
 
 MODEL_SIZE = "S"
@@ -114,33 +127,46 @@ regulargrid_kwargs = dict( # for RegularGridModel
 wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
     **regulargrid_kwargs,
     model_kwargs=dict( # for FlowMatching
-        submodel="unet",
-        model_kwargs=dict( # for RegularGridModel (UNet)
+        submodel="swintransformer",
+        model_kwargs=dict( # for RegularGridModel (SwinTransformer)
             **regulargrid_kwargs,
-            model_kwargs=dict( # for UNet
+            model_kwargs=dict( # for SwinTransformer
+                img_size=(32, 64),
+                patch_size=1,
+                window_size=(4, 8),
+                embed_dim=MODEL_DIMS[MODEL_SIZE]["embed_dim"],
+                depths=(MODEL_DIMS[MODEL_SIZE]["depth"],),
                 in_chans=LEN_ALL_VARS + 1, # + 1 for flow_time
                 out_chans=LEN_ALL_TARGET_VARS,
-                embed_dim=MODEL_DIMS[MODEL_SIZE]["embed_dim"],
-                act="leakyrelu",
-                norm="batch",
-                enc_filters=[[7], [3, 3], [3, 3], [3, 3]],
-                dec_filters=[[3, 3], [3, 3], [3, 3], [3, 3]],
-                in_interpolation="bilinear",
-                out_interpolation="nearest-exact",
-                out_clip=None,
+                num_heads=(8,),
+                mlp_ratio=4.0,
+                drop_path_rate=0.1,
+                interpolation_mode="nearest-exact",
             ),
         ),
-        generating=True,
         return_intermediates=True,
         method="midpoint",  # 'midpoint' or 'euler'
         nlev=nlev,
-        step_size=0.2,
+        step_size=0.1,
     ),
 )
 
+flow = MODELWRAPPERS["flowmatching"](**wrapper_kwargs)
+
+generate_kwargs = dict(
+    n_samples=100,
+    masking=True,
+    pattern="vertical",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "sattelite",
+    analyze_masking=True,
+    obs_fraction=0.3,  # if masking=True: [0, 1]
+    noise=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
+    analyze_noise=False,
+    avg_over_levels=True,
+)
+
 lit_module_kwargs = dict(
-    model="flowmatching",
-    model_kwargs=wrapper_kwargs,
+    model=flow,
+    model_kwargs=wrapper_kwargs["model_kwargs"],
     loss="flowmatching_mse",
     loss_kwargs=dict(),
     metrics=[
@@ -148,10 +174,10 @@ lit_module_kwargs = dict(
         for m in ["rmse", "r2", "nse", "rabsbias", "rrmse"]
     ], # + [dict(name="mass_rmsev2", kwargs=dict(molecule=m)) for m in ["co2"]],
     no_grad_step_shedule=None,
-    lr=3e-3,
-    weight_decay=0.0,
+    lr=1e-3,
+    weight_decay=0.1,
     lr_shedule_kwargs=dict(
-        warmup_steps=5000, halfcosine_steps=80000, min_lr=1.448612222179744e-07, max_lr=0.8001606601982787
+        warmup_steps=1000, halfcosine_steps=99000, min_lr=3e-7, max_lr=1.0
     ),
     val_dataloader_names=["singlestep"],
     plot_kwargs=dict(
@@ -205,29 +231,6 @@ data_path_forecast = Path(
     "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/"
 )
 
-generate_data_kwargs = data_kwargs.copy()
-
-generate_kwargs = dict(
-    n_samples=100,
-    masking=True,
-    data_path_generate="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/train/",
-    generate_data_kwargs=generate_data_kwargs,
-    pattern="vertical",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite", "oco2"
-    masking_time="step_early_masking",  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
-    t_threshold=0.3,  # if masking_time is not None: [0, 1]
-    masking_method="total_column_average_simple",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)", "total_column_average_add", "total_column_average_mult", "total_column_average_test"
-    use_dps_guidance=True,
-    guidance_scale=1.0,
-    guidance_start_t=0.0,  # [0, 1], start guidance integration steps, 1.0 for no guidance
-    guidance_end_t=1.0,  # [0, 1], end guidance integration steps, 0.0 for no guidance
-    guidance_loss_type="mse",  # 'mse' or 'l1'
-    refine_start=0.9,  # [0, 1], start refine integration steps, 1.0 for no refinement
-    analyze_masking=True,
-    obs_fraction=0.3,  # if masking=True and pattern!="oco2": [0, 1]
-    noise_pattern=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
-    analyze_noise=False,
-    avg_over_levels=False,
-)
 
 trainer_kwargs = dict(
     max_steps=10000,
@@ -331,7 +334,6 @@ if __name__ == "__main__":
 
 # execute via:
 # CUDA_VISIBLE_DEVICES=7 python3 -u
-# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/
-# flowmatching_firstrun_20251007_dev/train.py
+# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/02_fm_swintransformer_training/train.py
 # or:
-# sbatch {path}/train.slurm (check: squeue -u jgross)
+# sbatch {path}/train.slurm (check: squeue -u <username>)

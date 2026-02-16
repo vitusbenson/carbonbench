@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:A100:1
 #SBATCH --job-name=flowmatching_pred
 #SBATCH --mail-type=END
-#SBATCH -o /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/04_osse_no_masking_reference/slurm_%A.out
+#SBATCH -o /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/05_fm_unet_osse_artificial_3D_mask/slurm_%A.out
 
 
 source activate neuraltransport
@@ -33,7 +33,7 @@ do
 done
 
 # Define output directory (current dev version)
-OUT_DIR=/Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/04_osse_no_masking_reference
+OUT_DIR=/Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/05_fm_unet_osse_artificial_3D_mask
 
 # Run model in prediction-only mode
 srun python3 -u $OUT_DIR/train.py --data_path $LOCAL_DIR --only_pred # --rollout, --ckpt "best"

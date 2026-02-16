@@ -1,5 +1,7 @@
 """
-! -> test whether pre oco2 masking pipeline is still working <-!.
+! -> Masking with OCO-2 data <-!.
+
+(flowmatching_20251205_2_unet_oco2mask_dev)
 
 Training and evaluation script for Flow Matching models on given data.
 
@@ -85,18 +87,8 @@ ds_stats = xr.open_zarr(
     f"/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/train/carbontracker_{grid}_{vertical_levels}_{freq}_stats.zarr"
 ).compute()
 
-inv_std = {
-    k: 1
-    / (ds_stats[f"{k}_delta"].sel(stats="std").where(lambda x: x > 1e-14, 1).values)
-    ** 2
-    for k in TARGET_VARS  # CARBOSCOPE_CARBON3D_VARS
-}
 
-weights = {k: cos_lat * inv_std[k] for k in inv_std}
-
-LOSS_WEIGHTS = {k: (10 * v / LEN_ALL_TARGET_VARS) for k, v in weights.items()}
-
-METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in TARGET_VARS}
+METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in ["co2massmix"]}
 
 
 MODEL_DIMS = {
@@ -144,7 +136,7 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
         return_intermediates=True,
         method="midpoint",  # 'midpoint' or 'euler'
         nlev=nlev,
-        step_size=0.1,
+        step_size=None,  # refine_start creates time_grid which replaces step_size
     ),
 )
 
@@ -235,19 +227,19 @@ generate_data_kwargs = dict(
 )
 
 generate_kwargs = dict(
-    n_samples=10,
+    n_samples=100,
     masking=True,
     data_path_generate="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/OCO2MIP_OCO2/train/",
     generate_data_kwargs=generate_data_kwargs,
-    pattern="oco2",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite",
-    window_hours=6,  # hours of observation window for "oco2" pattern
+    pattern="oco2",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite", "oco2"
+    window_hours=72,  # hours of observation window for "oco2" pattern
     masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
     t_threshold=0.9,  # if masking_time is not None: [0, 1]
-    masking_method="interpolate",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)",
+    masking_method="total_column_average_simple_unitary",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)", "total_column_average_add", "total_column_average_mult", "total_column_average_test"
     refine_start=0.9,  # [0, 1], start refine integration steps, 1.0 for no refinement
     steps=11,  # creates number of integration steps during generation
     analyze_masking=True,
-    obs_fraction=0.3,  # if masking=True: [0, 1]
+    obs_fraction=0.3,  # if masking=True and pattern!="oco2": [0, 1]
     noise_pattern=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
     analyze_noise=False,
     avg_over_levels=False,
@@ -355,7 +347,6 @@ if __name__ == "__main__":
 
 # execute via:
 # CUDA_VISIBLE_DEVICES=7 python3 -u
-# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/
-# flowmatching_firstrun_20251007_dev/train.py
+# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/07_fm_unet_oco2/train.py
 # or:
-# sbatch {path}/train.slurm (check: squeue -u jgross)
+# sbatch {path}/train.slurm (check: squeue -u <username>)

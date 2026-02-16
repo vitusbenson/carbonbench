@@ -1,5 +1,7 @@
 """
-! -> Inference with real OCO-2 data using interpolate masking <-!.
+! -> Artificial Masking with CarbonTracker data by interpolating with noise <-!.
+
+(flowmatching_20251024_1_unet_masking_interpolate_dev)
 
 Training and evaluation script for Flow Matching models on given data.
 
@@ -34,6 +36,7 @@ from neural_transport.datasets.grids import (
 from neural_transport.datasets.vars import *  # noqa: F403
 
 # neural_transport
+from neural_transport.models.wrappers_registry import MODELWRAPPERS
 from neural_transport.training import train_and_eval_rollout, train_and_eval_singlestep
 
 torch.set_float32_matmul_precision("high")
@@ -140,7 +143,6 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
                 out_clip=None,
             ),
         ),
-        generating=True,
         return_intermediates=True,
         method="midpoint",  # 'midpoint' or 'euler'
         nlev=nlev,
@@ -148,9 +150,21 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
     ),
 )
 
+flow = MODELWRAPPERS["flowmatching"](**wrapper_kwargs)
+
+generate_kwargs = dict(
+    n_samples=100,
+    masking=True,
+    pattern="vertical",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "sattelite",
+    analyze_masking=True,
+    obs_fraction=0.3,  # if masking=True: [0, 1]
+    noise=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
+    analyze_noise=False,
+)
+
 lit_module_kwargs = dict(
-    model="flowmatching",
-    model_kwargs=wrapper_kwargs,
+    model=flow,
+    model_kwargs=wrapper_kwargs["model_kwargs"],
     loss="flowmatching_mse",
     loss_kwargs=dict(),
     metrics=[
@@ -215,43 +229,6 @@ data_path_forecast = Path(
     "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/"
 )
 
-generate_data_kwargs = dict(
-    data_path="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/OCO2MIP_OCO2",
-    dataset="mip_oco2",
-    grid=grid,
-    vertical_levels=vertical_levels,
-    freq=freq,
-    n_timesteps=1,
-    batch_size_pred=BATCH_SIZE_PRED,
-    num_workers=32 * N_GPUS,
-    val_rollout_n_timesteps=None,
-    target_vars=["xco2_2019_scale"],  # masking variable
-    forcing_vars=[                    # needed to convert co2massmix to xco2
-        "xco2_averaging_kernel",
-        "xco2_apriori",
-        "co2_profile_apriori",
-    ],
-    compute=False,
-)
-
-generate_kwargs = dict(
-    n_samples=10,
-    masking=True,
-    data_path_generate="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/OCO2MIP_OCO2/train/",
-    generate_data_kwargs=generate_data_kwargs,
-    pattern="oco2",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite",
-    window_hours=6,  # hours of observation window for "oco2" pattern
-    masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
-    t_threshold=0.9,  # if masking_time is not None: [0, 1]
-    masking_method="interpolate",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)",
-    refine_start=0.9,  # [0, 1], start refine integration steps, 1.0 for no refinement
-    steps=11,  # creates number of integration steps during generation
-    analyze_masking=True,
-    obs_fraction=0.3,  # if masking=True: [0, 1]
-    noise_pattern=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise",
-    analyze_noise=False,
-    avg_over_levels=False,
-)
 
 trainer_kwargs = dict(
     max_steps=10000,
@@ -355,7 +332,7 @@ if __name__ == "__main__":
 
 # execute via:
 # CUDA_VISIBLE_DEVICES=7 python3 -u
-# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/
-# flowmatching_firstrun_20251007_dev/train.py
+# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/
+# 05_fm_unet_osse_artificial_3D_mask/train.py
 # or:
-# sbatch {path}/train.slurm (check: squeue -u jgross)
+# sbatch {path}/train.slurm (check: squeue -u <username>)

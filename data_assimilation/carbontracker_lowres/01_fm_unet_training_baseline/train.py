@@ -1,6 +1,8 @@
 """
 ! -> new base line with best hyperparameters so far <-!.
 
+(flowmatching_20251030_1_unet_baseline_dev)
+
 Training and evaluation script for Flow Matching models on given data.
 
 This script sets up the model architecture, training configuration,
@@ -332,7 +334,7 @@ if __name__ == "__main__":
 
 # execute via:
 # CUDA_VISIBLE_DEVICES=7 python3 -u
-# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/transport_models/carbontracker_lowres/flowmatching_dev/
-# flowmatching_20251030_1_unet_baseline_dev/train.py
+# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/
+# 01_fm_unet_training_baseline/train.py
 # or:
-# sbatch {path}/train.slurm (check: squeue -u jgross)
+# sbatch {path}/train.slurm (check: squeue -u <username>)
