@@ -19,7 +19,8 @@ printenv
 
 # Set variables
 SAVE_DIR="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/"
-FREQ="6h"
+FREQ="3h"
+echo "Frequency: $FREQ"
 
 SCRIPT_DIR=/Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data
 
