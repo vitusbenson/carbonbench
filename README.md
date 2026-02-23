@@ -121,8 +121,8 @@ data_assimilation/
 These scripts implement training, sampling, masking experiments, and noise exploration for generative CO₂ transport modeling using Flow Matching.
 
 Current Limitations:
-- Masking patterns remain as an artefact in the generated samples.
-- The transition from artificial 3D observational data to satellite-based 2D observational data leads to a significant perfomance drop, which is an open challenge.
+- Masking patterns remain as an artifact in the generated samples.
+- The transition from artificial 3D observational data to satellite-based 2D observational data leads to a significant performance drop, which is an open challenge.
 
 ## Installation
 
