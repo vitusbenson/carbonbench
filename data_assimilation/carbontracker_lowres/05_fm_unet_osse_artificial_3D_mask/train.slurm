@@ -36,7 +36,7 @@ done
 OUT_DIR=/Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/05_fm_unet_osse_artificial_3D_mask
 
 # Run model in prediction-only mode
-srun python3 -u $OUT_DIR/train.py --data_path $LOCAL_DIR --only_pred # --rollout, --ckpt "best"
+srun python3 -u $OUT_DIR/train.py --training_data_root $LOCAL_DIR --only_pred # --rollout, --ckpt "best"
 
 # Clean up scratch
 rm -rf $LOCAL_DIR

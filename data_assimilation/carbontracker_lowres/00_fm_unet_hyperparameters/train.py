@@ -16,7 +16,9 @@ Typical usage:
     python script_name.py --rollout        # Run rollout evaluation
     python script_name.py --only_pred      # Only evaluate, no training
     python script_name.py --ckpt best      # Use 'best' checkpoint instead of default 'last'
-    python script_name.py --data_path ...  # Override dataset path
+    python sn.py --training_data_root ...  # Override training data root path
+    python sn.py --masking_data_root ...   # Override masking data root path
+    python sn.py --forecast_data_root ...  # Override forecast data root path
 """
 
 #!usr/bin/python
@@ -42,6 +44,10 @@ from neural_transport.training import train_and_eval_rollout, train_and_eval_sin
 
 torch.set_float32_matmul_precision("high")
 pl.seed_everything(42)
+
+DEFAULT_TRAINING_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker"
+DEFAULT_MASKING_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/OCO2MIP_OCO2"
+DEFAULT_FORECAST_DATA_ROOT = DEFAULT_TRAINING_DATA_ROOT + "/test"
 
 TARGET_VARS = ["co2massmix"]
 # Uncomment for conditional Flow Matching
@@ -86,7 +92,7 @@ cos_lat = np.cos(np.radians(lat))[:, None, None].repeat(len(lon), axis=1).reshap
 cos_lat = cos_lat / np.mean(cos_lat)
 
 ds_stats = xr.open_zarr(
-    f"/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/train/carbontracker_{grid}_{vertical_levels}_{freq}_stats.zarr"
+    f"{DEFAULT_TRAINING_DATA_ROOT}/train/carbontracker_{grid}_{vertical_levels}_{freq}_stats.zarr"
 ).compute()
 
 inv_std = {
@@ -144,27 +150,12 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
                 out_clip=None,
             ),
         ),
+        generating=True,
         return_intermediates=True,
         method="midpoint",  # 'midpoint' or 'euler'
         nlev=nlev,
         step_size=0.1,
     ),
-)
-
-generate_kwargs = dict(
-    n_samples=20,
-    masking=True,
-    pattern="vertical",  # if masking=True: "random", "vertical", "horizontal", "checkerboard", "satellite",
-    masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking", None
-    t_threshold=0.9,  # if masking_time is not None: [0, 1]
-    masking_method="interpolate",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)",
-    refine_start=1.0,  # [0, 1], start refine integration steps, 1.0 for no refinement
-    analyze_masking=True,
-    obs_fraction=0.3,  # if masking=True: [0, 1]
-    noise=None,  # None, "spiral_outward_noise", "spiral_noise", "gaussian_noise",
-    # "geodesic_noise", "linear_noise", "antipodal_orthogonal_noise"
-    analyze_noise=False,
-    avg_over_levels=True,
 )
 
 lit_module_kwargs = dict(
@@ -199,7 +190,7 @@ BATCH_SIZE_TRAIN = 64
 BATCH_SIZE_PRED = 32
 
 data_kwargs = dict(
-    data_path="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker",
+    data_path=DEFAULT_TRAINING_DATA_ROOT,
     dataset="carbontracker",
     grid=grid,
     vertical_levels=vertical_levels,
@@ -231,9 +222,29 @@ data_kwargs = dict(
 )
 
 data_path_forecast = Path(
-    "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/"
+    DEFAULT_FORECAST_DATA_ROOT
 )
 
+generate_kwargs_nested = dict(
+    general=dict(
+        n_samples=20,
+        refine_start=1.0,  # [0, 1], start refine integration steps, 1.0 for no refinement
+        avg_over_levels=True,
+    ),
+    mask=dict(
+        masking=True,
+        pattern="vertical",  # if masking=True: "random", "horizontal", "checkerboard", "satellite", "oco2"
+        masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking",
+        t_threshold=0.9,  # if masking_time is not None: [0, 1]
+        masking_method="interpolate",  # if masking=True: "simple", "interpolate", "preserve_global_mean(_and_var)",
+        analyze_masking=True,
+        obs_fraction=0.3,  # if masking=True and pattern!="oco2": [0, 1]
+    ),
+    noise=dict(
+        noise_pattern=None,  #"spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise"
+        analyze_noise=False,
+    ),
+)
 
 trainer_kwargs = dict(
     max_steps=10000,
@@ -263,14 +274,23 @@ rollout_trainer_kwargs = dict(
     ),
 )
 
-obs_compare_path = f"/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/test/obs_carbontracker_{grid}_{vertical_levels}_{freq}.zarr"  # noqa: E501
+obs_compare_path = f"{DEFAULT_FORECAST_DATA_ROOT}/obs_carbontracker_{grid}_{vertical_levels}_{freq}.zarr"
+
+def flatten_dict(d: dict) -> dict:
+    """Flattens top-level dictionary values into a single dictionary."""
+    out = {}
+    for section in d.values():
+        out.update(section)
+    return out
 
 
 def main(
         rollout: bool = False,
         train: bool = True,
         ckpt: str = "last",
-        data_path: str|None = None,
+        training_data_root: str|None = None,
+        masking_data_root: str|None = None,
+        forecast_data_root: str|None = None,
         data_kwargs: dict|None = None,
         lit_module_kwargs: dict|None = None,
         trainer_kwargs: dict|None = None,
@@ -288,8 +308,17 @@ def main(
     flow = MODELWRAPPERS["flowmatching"](**wrapper_args)
     lit_args.update(dict(model=flow))
 
-    if data_path is not None:
-        data_args["data_path"] = data_path
+    generate_kwargs = flatten_dict(generate_kwargs_nested)
+
+    local_training_path = training_data_root or DEFAULT_TRAINING_DATA_ROOT
+    data_args["data_path"] = local_training_path
+    local_masking_path = masking_data_root or DEFAULT_MASKING_DATA_ROOT
+    generate_kwargs["data_path_generate"] = local_masking_path + "/train"
+    local_forecast_path = forecast_data_root or DEFAULT_FORECAST_DATA_ROOT
+    obs_compare_path = (
+        f"{local_forecast_path}/obs_carbontracker_{grid}_{vertical_levels}_{freq}.zarr"
+    )
+    data_path_forecast = Path(local_forecast_path)
 
     if rollout:
         train_and_eval_rollout(
@@ -344,17 +373,22 @@ if __name__ == "__main__":
     parser.add_argument("--rollout", action="store_true")
     parser.add_argument("--only_pred", action="store_true")
     parser.add_argument("--ckpt", type=str, default="best")
-    parser.add_argument("--data_path", type=str, default=None)
+    parser.add_argument("--training_data_root", type=str, default=str(DEFAULT_TRAINING_DATA_ROOT))
+    parser.add_argument("--masking_data_root", type=str, default=str(DEFAULT_MASKING_DATA_ROOT))
+    parser.add_argument("--forecast_data_root", type=str, default=str(DEFAULT_FORECAST_DATA_ROOT))
     args = parser.parse_args()
     main(
         rollout=args.rollout,
         train=not args.only_pred,
         ckpt=args.ckpt,
-        data_path=args.data_path,
+        training_data_root=args.training_data_root,
+        masking_data_root=args.masking_data_root,
+        forecast_data_root=args.forecast_data_root,
     )
 
 # execute via:
 # CUDA_VISIBLE_DEVICES=7 python3 -u
-# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/00_fm_unet_hyperparameters/train.py
+# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/
+# 00_fm_unet_hyperparameters/train.py
 # or:
 # sbatch {path}/train.slurm (check: squeue -u <username>)

@@ -89,11 +89,13 @@ def objective(trial: optuna.trial.Trial) -> float:
         main(
             rollout=False,
             train=True,
-            data_path=None,
-            wrapper_kwargs=trial_wrapper_kwargs,
+            training_data_root=None,
+            masking_data_root=None,
+            forecast_data_root=None,
+            data_kwargs=trial_data_kwargs,
             lit_module_kwargs=trial_lit_module_kwargs,
             trainer_kwargs=trial_trainer_kwargs,
-            data_kwargs=trial_data_kwargs,
+            wrapper_kwargs=trial_wrapper_kwargs,
             run_dir=trial_logdir,
         )
     except (RuntimeError, FileNotFoundError, ValueError) as e:

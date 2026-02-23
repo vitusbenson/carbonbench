@@ -24,6 +24,26 @@ echo "TMDIR: $TEMPDIR"
 LOCAL_DIR=/scratch/jgross/$SLURM_JOB_ID/Carbontracker/
 REMOTE_DIR=/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/
 
+# --- Scratch setup ---
+# Create a unique local scratch directory per job
+LOCAL_DIR="/scratch/jgross/${SLURM_JOB_ID:?}/Carbontracker"
+REMOTE_DIR="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/"
+SUBMIT_DIR="${SLURM_SUBMIT_DIR:?}"
+
+mkdir -p "${LOCAL_DIR}"
+
+# Cleanup function to remove scratch even on failure/cancel
+function clean_up {
+    echo "Cleaning up local scratch at $(date)"
+    cd "${SUBMIT_DIR}" || exit
+    rm -rf "${LOCAL_DIR:?}"
+    echo "Cleanup done."
+    exit
+}
+
+# Call clean_up on any exit (success, failure, cancel)
+trap 'clean_up' EXIT
+
 # Copy data (training and validation)
 for split in train val
 do
@@ -39,9 +59,6 @@ done
 OUT_DIR=/Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/03_fm_sfno_training
 
 # Run model in prediction-only mode
-srun python3 -u $OUT_DIR/train.py --data_path $LOCAL_DIR --only_pred # --rollout, --ckpt "best",
-
-# Clean up scratch
-rm -rf $LOCAL_DIR
+srun python3 -u $OUT_DIR/train.py --training_data_root $LOCAL_DIR # --rollout, --ckpt "best", --only_pred 
 
 echo "Finished run at: $(date)"

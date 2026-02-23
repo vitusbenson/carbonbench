@@ -59,6 +59,6 @@ done
 OUT_DIR=/Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/01_fm_unet_training_baseline
 
 # Run model in prediction-only mode
-srun python3 -u $OUT_DIR/train.py --data_path "${LOCAL_DIR}" # --rollout, --ckpt "best", --only_pred
+srun python3 -u $OUT_DIR/train.py --training_data_root "${LOCAL_DIR}" # --rollout, --ckpt "best", --only_pred
 
 echo "Finished run at: $(date)"
