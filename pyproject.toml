@@ -1,0 +1,145 @@
+[project]
+name = "carbonbench"
+readme = "README.md"
+requires-python = ">3.6"
+
+[tool.ruff]
+show-fixes = true
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+    "sandbox",
+]
+
+# Same as Black.
+line-length = 120
+indent-width = 4
+
+target-version = "py312"
+
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+select = [
+    "A", # flake8-builtins
+    "ANN", # flake8-annotations
+    "ARG", # flake8-unused-arguments
+    "B", # flake8-bugbear
+    "BLE", # flake8-blind-except
+    "C", # flake8-comprehensions
+    "D", # pydocstyle
+    "DTZ", # lake8-datetimez
+    "E", # pycodestyle error
+    "ERA", # eradicate
+    "F", # Pyflakes
+    "I", # isort: sort imports
+    "ICN", # flake8-import-conventions
+    "ISC", # correct string literal concatenation
+    "N", # pep8-naming
+    "NPY", # NumPy-specific rules
+    "PGH", # pygrep-hooks
+    "PIE", # flake8-pie
+    "PL", # Pylint
+    "PT", # flake8-pytest-style
+    "PTH", # pyflakes-use-pathlib
+    "PYI", # specializations for type hinting stub files
+    "RET", # flake8-return
+    "RUF", # ruff-specific rules
+    "S", # pyflakes-bandit
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+    "TID", # banned-api
+    "UP", # pyupgrade
+    "W", # pycodestyle warning
+]
+ignore = [
+    "ANN002", # Missing type annotation for *args
+    "ANN003", # Missing type annotation for **kwargs
+    "ANN10", # no need to type 'self', 'cls'
+    "C408", # unnecessary-collection-call: e.g. 'dict(a =... )' instead of `{'a': .
+    "COM", # flake8-commas (not maintained, covered by black)
+    "D203", # no extra lines
+    "D211", # blank-line-before-class: contradicts to another setting
+    "D213", # multi-line-summary-second-line: unreasonable strict
+    "D401", # non-imperative-mood: unreasonable strict
+    "PLR0913", # max number of arguments
+    "PLR2004", # Magic value used in comparison
+]
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = ["ERA"]
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+# Enable auto-formatting of code examples in docstrings. Markdown,
+# reStructuredText code/literal blocks and doctests are all supported.
+#
+# This is currently disabled by default, but it is planned for this
+# to be opt-out in the future.
+docstring-code-format = true
+
+# Set the line length limit used when formatting code snippets in
+# docstrings.
+#
+# This only has an effect when the `docstring-code-format` setting is
+# enabled.
+docstring-code-line-length = "dynamic"
+
+# Ignore `E402` (import violations) in all `__init__.py` files, and in select subdirectories.
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402"]
+"**/{tests,docs,tools}/*" = ["E402"]
+"**/tests/*" = ["S101"]
+
+[tool.black]
+line-length = 120
+
+[tool.flake8]
+max-line-length = 120
+
+[tool.mypy]
+exclude = ["demos/"]
+
+plugins = "numpy.typing.mypy_plugin"
+check_untyped_defs = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"

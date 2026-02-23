@@ -18,7 +18,7 @@ if __name__ == "__main__":
     parser.add_argument("--freq", type=str, default="3h")
     args = parser.parse_args()
 
-    download_data(args.save_dir)
+    # download_data(args.save_dir)
 
     regrid_carbontracker(
         args.save_dir,

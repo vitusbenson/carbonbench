@@ -173,3 +173,17 @@ events.out.tfevents.*
 *.zarr
 *.csv
 *hparams.yaml
+
+# IDE
+.vscode/
+
+# Databases
+*.db
+
+# Plots generated (Jonathan)
+transport_models/carbontracker_lowres/flowmatching_dev/**/*.html
+
+# Developement (Jonathan)
+transport_models/carbontracker_lowres/flowmatching_dev
+transport_models/carbontracker_midres/flowmatching_dev
+transport_models/carbontracker_origres/flowmatching_dev

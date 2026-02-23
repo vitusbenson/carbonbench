@@ -1,7 +1,7 @@
 ![#](https://raw.githubusercontent.com/vitusbenson/carbonbench/main/carbonbench_logo.png)
 
 
-*A model intercomparison of neural network emulators for atmospheric transport.*
+*A model intercomparison of neural network emulators for atmospheric transport, extended with a data assimilation and sampling framework based on Flow Matching.*
 
 
 <a href="https://opensource.org/licenses/MIT" target="_blank">
@@ -100,6 +100,29 @@ transport_models/dataset/model/experiment
 ### Reproducing figures from Benson et al. 2024
 1. Train (all / some) models (see above)
 2. Run the plotting scripts under [`plotting/first_paper`](plotting/first_paper): Adjust all paths in these scripts to match the paths where you stored data and experiment outputs.
+
+## Data Assimilation Experiments (Flow Matching)
+
+In addition to the baseline atmospheric transport emulators, this repository now includes an experimental data assimilation framework based on Flow Matching, wrapped around the existing models.<br>
+The [flow_matching](https://github.com/facebookresearch/flow_matching) generative modeling framework (Lipman et al., [2024](https://arxiv.org/abs/2412.06264)) is used.<br>
+The experiments mirror the structure in `transport_models` after running the scripts located under:
+```
+data_assimilation/
+│
+├── carbontracker_lowres/
+|  ├── 00_fm_model_description
+|  |  ├── train.py 	   # standalone training/generation script based on description
+|  |  └── train.slurm  # submits train.py to a SLURM cluster
+|  ├── 01_fm_model_description
+|  └── ...
+├── carbontracker_midres/
+|  ├── ...
+```
+These scripts implement training, sampling, masking experiments, and noise exploration for generative CO₂ transport modeling using Flow Matching.
+
+Current Limitations:
+- Masking patterns remain as an artifact in the generated samples.
+- The transition from artificial 3D observational data to satellite-based 2D observational data leads to a significant performance drop, which is an open challenge.
 
 ## Installation
 
