@@ -20,8 +20,8 @@ printenv
 # Set variables
 SAVE_DIR="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/"
 GRIDNAME="latlon5.625"
-VERTICAL_LEVELS="l3"
-FREQ="3h"
+VERTICAL_LEVELS="l10"
+FREQ="6h"
 
 echo "Gridname: $GRIDNAME, Vertical Levels: $VERTICAL_LEVELS, Frequency: $FREQ"
 
