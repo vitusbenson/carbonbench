@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:A100:1
 #SBATCH --job-name=fm_ot_training
 #SBATCH --mail-type=END
-#SBATCH -o /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/09_fm_unet_ot_training/slurm_%A.out
+#SBATCH -o /Net/Groups/BGI/people/vbenson/CarbonBench/dryrun/carbonbench/data_assimilation/carbontracker_lowres/09_fm_unet_ot_training/slurm_%A.out
 
 
 source activate neuraltransport
@@ -21,7 +21,7 @@ printenv
 echo "TMDIR: $TEMPDIR"
 
 # --- Scratch setup ---
-LOCAL_DIR="/scratch/jgross/${SLURM_JOB_ID:?}/Carbontracker"
+LOCAL_DIR="/scratch/vbenson/${SLURM_JOB_ID:?}/Carbontracker"
 REMOTE_DIR="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/"
 SUBMIT_DIR="${SLURM_SUBMIT_DIR:?}"
 
@@ -49,7 +49,7 @@ do
 done
 
 # Define output directory
-OUT_DIR=/Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/09_fm_unet_ot_training
+OUT_DIR=/Net/Groups/BGI/people/vbenson/CarbonBench/dryrun/carbonbench/data_assimilation/carbontracker_lowres/09_fm_unet_ot_training
 
 srun python3 -u $OUT_DIR/train.py --training_data_root "${LOCAL_DIR}"
 
