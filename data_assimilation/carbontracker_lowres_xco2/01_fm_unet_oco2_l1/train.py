@@ -1,24 +1,8 @@
 """
-! -> Masking with OCO-2 data <-!.
+Flow Matching with OCO-2 masking for XCO2 (l1 single-level).
 
-(flowmatching_20251205_2_unet_oco2mask_dev)
-
-Training and evaluation script for Flow Matching models on given data.
-
-This script sets up the model architecture, training configuration,
-and dataset parameters for predicting atmospheric CO2 mass mixing ratios
-using the Flow Matching method implemented in the `neural_transport` framework.
-
-It supports both single-step training/evaluation and multi-step rollout evaluation.
-Execution mode is selected via command-line arguments.
-
-Typical usage:
-    python script_name.py --rollout        # Run rollout evaluation
-    python script_name.py --only_pred      # Only evaluate, no training
-    python script_name.py --ckpt best      # Use 'best' checkpoint instead of default 'last'
-    python sn.py --training_data_root ...  # Override training data root path
-    python sn.py --masking_data_root ...   # Override masking data root path
-    python sn.py --forecast_data_root ...  # Override forecast data root path
+For l1, the model predicts total column XCO2 directly, so no averaging kernel
+is needed at inference time. OCO-2 XCO2 observations can be compared directly.
 """
 
 #!usr/bin/python
@@ -27,8 +11,6 @@ from pathlib import Path
 
 import numpy as np
 import pytorch_lightning as pl
-
-# torch
 import torch
 import xarray as xr
 from neural_transport.datasets.grids import (
@@ -36,47 +18,24 @@ from neural_transport.datasets.grids import (
     VERTICAL_LAYERS_PROTOTYPE_COORDS,
 )
 from neural_transport.datasets.vars import *  # noqa: F403
-
-# neural_transport
 from neural_transport.training import train_and_eval_rollout, train_and_eval_singlestep
 
 torch.set_float32_matmul_precision("high")
 pl.seed_everything(42)
 
-DEFAULT_TRAINING_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker"
-DEFAULT_MASKING_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/OCO2MIP_OCO2"
+DEFAULT_TRAINING_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/tmp_vitus/Carbontracker"
+DEFAULT_MASKING_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/tmp_vitus/OCO2MIP_OCO2/OCO2MIP_OCO2"
 DEFAULT_FORECAST_DATA_ROOT = DEFAULT_TRAINING_DATA_ROOT + "/test"
 
 TARGET_VARS = ["co2massmix"]
-# Uncomment for conditional Flow Matching
-FORCING_VARS_1D = [
-    # "flow_time"
-]
-FORCING_VARS_2D = [
-    # "blh",
-    # "cell_area",
-    # "co2flux_anthro",
-    # "co2flux_land",
-    # "co2flux_ocean",
-    # "orography",
-    # "tisr",
-]
-FORCING_VARS_3D = [
-    # "airmass",
-    # "gph_bottom",
-    # "gph_top",
-    # "p_bottom",
-    # "p_top",
-    # "q",
-    # "t",
-    # "u",
-    # "v",
-]
+FORCING_VARS_1D = []
+FORCING_VARS_2D = []
+FORCING_VARS_3D = []
 grid = "latlon5.625"
-vertical_levels = "l10"
+vertical_levels = "l1"
 freq = "6h"
 
-nlev = len(VERTICAL_LAYERS_PROTOTYPE_COORDS[vertical_levels]["level"])
+nlev = len(VERTICAL_LAYERS_PROTOTYPE_COORDS[vertical_levels]["level"])  # 1
 
 FORCING_VARS = FORCING_VARS_1D + FORCING_VARS_2D + FORCING_VARS_3D
 LEN_ALL_TARGET_VARS = nlev * len(TARGET_VARS)
@@ -106,7 +65,7 @@ MODEL_DIMS = {
 
 MODEL_SIZE = "S"
 
-regulargrid_kwargs = dict( # for RegularGridModel
+regulargrid_kwargs = dict(
     input_vars=TARGET_VARS + FORCING_VARS,
     target_vars=TARGET_VARS,
     nlat=len(lat),
@@ -118,14 +77,14 @@ regulargrid_kwargs = dict( # for RegularGridModel
     targshift=True,
 )
 
-wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
+wrapper_kwargs = dict(
     **regulargrid_kwargs,
-    model_kwargs=dict( # for FlowMatching
+    model_kwargs=dict(
         submodel="unet",
-        model_kwargs=dict( # for RegularGridModel (UNet)
+        model_kwargs=dict(
             **regulargrid_kwargs,
-            model_kwargs=dict( # for UNet
-                in_chans=LEN_ALL_VARS + 1, # + 1 for flow_time
+            model_kwargs=dict(
+                in_chans=LEN_ALL_VARS + 1,  # + 1 for flow_time
                 out_chans=LEN_ALL_TARGET_VARS,
                 embed_dim=MODEL_DIMS[MODEL_SIZE]["embed_dim"],
                 act="leakyrelu",
@@ -139,9 +98,9 @@ wrapper_kwargs = dict( # for RegularGridModel (FlowMatching)
         ),
         generating=True,
         return_intermediates=True,
-        method="midpoint",  # 'midpoint' or 'euler'
+        method="midpoint",
         nlev=nlev,
-        step_size=None,  # refine_start creates time_grid which replaces step_size
+        step_size=None,
     ),
 )
 
@@ -153,7 +112,7 @@ lit_module_kwargs = dict(
     metrics=[
         dict(name=m, kwargs=dict(weights=METRIC_WEIGHTS))
         for m in ["rmse", "r2", "nse", "rabsbias", "rrmse"]
-    ], # + [dict(name="mass_rmsev2", kwargs=dict(molecule=m)) for m in ["co2"]],
+    ],
     no_grad_step_shedule=None,
     lr=1e-3,
     weight_decay=0.1,
@@ -163,7 +122,7 @@ lit_module_kwargs = dict(
     val_dataloader_names=["singlestep"],
     plot_kwargs=dict(
         variables=["co2molemix"],
-        layer_idxs=[0, 3, 5, 8],
+        layer_idxs=[0],
         n_samples=2,
         dataset="carbontracker",
         grid=grid,
@@ -187,24 +146,8 @@ data_kwargs = dict(
     batch_size_pred=BATCH_SIZE_PRED,
     num_workers=32 * N_GPUS,
     val_rollout_n_timesteps=None,
-    target_vars=["co2massmix"], #, "airmass"
-    forcing_vars=[
-        # "gph_bottom",
-        # "gph_top",
-        # "p_bottom",
-        # "p_top",
-        # "q",
-        # "t",
-        # "u",
-        # "v",
-        # "blh",
-        # "cell_area",
-        # "co2flux_anthro",
-        # "co2flux_land",
-        # "co2flux_ocean",
-        # "orography",
-        # "tisr",
-    ],
+    target_vars=["co2massmix"],
+    forcing_vars=[],
     compute=False,
 )
 
@@ -222,20 +165,16 @@ generate_data_kwargs = dict(
     batch_size_pred=BATCH_SIZE_PRED,
     num_workers=32 * N_GPUS,
     val_rollout_n_timesteps=None,
-    target_vars=["xco2_2019_scale"],  # masking variable
-    forcing_vars=[                    # needed to convert co2massmix to xco2
-        "xco2_averaging_kernel",
-        "xco2_apriori",
-        "co2_profile_apriori",
-    ],
+    target_vars=["xco2_2019_scale"],
+    forcing_vars=[],  # No AK needed for l1 — direct XCO2 comparison
     compute=False,
 )
 
 generate_kwargs_nested = dict(
     general=dict(
         n_samples=10,
-        refine_start=0.9,  # [0, 1], start refine integration steps, 1.0 for no refinement
-        steps=11,  # creates number of integration steps during generation
+        refine_start=0.9,
+        steps=11,
         avg_over_levels=False,
     ),
     data=dict(
@@ -244,17 +183,17 @@ generate_kwargs_nested = dict(
     ),
     mask=dict(
         masking=True,
-        mask_source="oco2",  # if masking==True: "oco2" or "test" (for synthetic patterns)
-        mask_pattern=None, # if mask_source=="oco2": "diagonal", "leftright", "topbottom", "checkerboard", "center_box"
-        window_hours=24,  # hours of observation window for "oco2" pattern
-        masking_time=None,  # "smooth_late_masking", "step_late_masking", "smooth_early_masking", "step_early_masking",
-        t_threshold=0.9,  # if masking_time is not None: [0, 1]
-        masking_method="total_column_average_simple_unitary",  # if masking==True: "simple", "interpolate", "preserve_global_mean(_and_var)", "total_column_average_add/mult/test"
+        mask_source="oco2",
+        mask_pattern=None,
+        window_hours=72,
+        masking_time=None,
+        t_threshold=0.9,
+        masking_method="simple",  # Direct XCO2 comparison, no AK needed
         analyze_masking=True,
-        obs_fraction=0.3,  # if masking==True and pattern!="oco2": [0, 1]
+        obs_fraction=0.3,
     ),
     noise=dict(
-        noise_pattern=None,  #"spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise"
+        noise_pattern=None,
         analyze_noise=False,
     ),
 )
@@ -270,7 +209,7 @@ trainer_kwargs = dict(
         "auto"
         if N_GPUS == 1
         else pl.strategies.DDPStrategy(find_unused_parameters=False)
-    ), # profiler="simple", fast_dev_run=True, # overfit_batches=10, # for debugging only!!
+    ),
 )
 
 rollout_trainer_kwargs = dict(
@@ -289,8 +228,8 @@ rollout_trainer_kwargs = dict(
 
 obs_compare_path = f"{DEFAULT_FORECAST_DATA_ROOT}/obs_carbontracker_{grid}_{vertical_levels}_{freq}.zarr"
 
+
 def flatten_dict(d: dict) -> dict:
-    """Flattens top-level dictionary values into a single dictionary."""
     out = {}
     for section in d.values():
         out.update(section)
@@ -301,11 +240,10 @@ def main(
         rollout: bool = False,
         train: bool = True,
         ckpt: str = "last",
-        training_data_root: str|None = None,
-        masking_data_root: str|None = None,
-        forecast_data_root: str|None = None,
+        training_data_root: str | None = None,
+        masking_data_root: str | None = None,
+        forecast_data_root: str | None = None,
         ) -> None:
-    """Main function to run the training or rollout evaluation."""
     run_dir = Path(__file__).resolve().parent
 
     generate_kwargs = flatten_dict(generate_kwargs_nested)
@@ -335,7 +273,7 @@ def main(
             timesteps=[3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31],
             train=train,
             ckpt=ckpt,
-            massfixers=["scale"],  # [None, "scale"],
+            massfixers=["scale"],
             generate_kwargs=generate_kwargs,
         )
 
@@ -354,7 +292,7 @@ def main(
             train=train,
             ckpt=ckpt,
             ckpt_kwargs=dict(
-                save_top_k=1,  # -1,
+                save_top_k=1,
                 save_last=True,
                 monitor="Loss/Val_singlestep",
                 filename="Epoch={epoch}-Step={step}-LossVal={Loss/Val_singlestep:.6f}",
@@ -384,9 +322,3 @@ if __name__ == "__main__":
         masking_data_root=args.masking_data_root,
         forecast_data_root=args.forecast_data_root,
     )
-
-# execute via:
-# CUDA_VISIBLE_DEVICES=7 python3 -u
-# /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/07_fm_unet_oco2/train.py
-# or:
-# sbatch {path}/train.slurm (check: squeue -u <username>)
