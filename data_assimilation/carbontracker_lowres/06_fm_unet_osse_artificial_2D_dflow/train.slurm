@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:A100:1
 #SBATCH --job-name=flowmatching_pred
 #SBATCH --mail-type=END
-#SBATCH -o /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/05_fm_unet_osse_artificial_3D_mask/slurm_%A.out
+#SBATCH -o /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/06_fm_unet_osse_artificial_2D_dflow/slurm_%A.out
 
 
 source activate neuraltransport
@@ -21,19 +21,19 @@ printenv
 echo "TMDIR: $TEMPDIR"
 
 # Paths
-LOCAL_DIR=/scratch/jgross/$SLURM_JOB_ID/Carbontracker/
-REMOTE_DIR=/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/
+LOCAL_DIR=/scratch/jgross/$SLURM_JOB_ID/OCO2MIP_OCO2/
+REMOTE_DIR=/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/OCO2MIP_OCO2/
 
 # Copy validation data only (no need for train data if only predicting)
 mkdir -p $LOCAL_DIR/val
-for file in carbontracker_latlon5.625_l10_6h.zarr carbontracker_latlon5.625_l10_6h_stats.zarr
+for file in mip_oco2_latlon5.625_l10_6h.zarr mip_oco2_latlon5.625_l10_6h_stats.zarr
 do
     echo "Copying val $file"
     cp -r $REMOTE_DIR/val/$file $LOCAL_DIR/val/$file
 done
 
 # Define output directory (current dev version)
-OUT_DIR=/Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/05_fm_unet_osse_artificial_3D_mask
+OUT_DIR=/Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/06_fm_unet_osse_artificial_2D_dflow
 
 # Run model in prediction-only mode
 srun python3 -u $OUT_DIR/train.py --training_data_root $LOCAL_DIR --only_pred # --rollout, --ckpt "best"

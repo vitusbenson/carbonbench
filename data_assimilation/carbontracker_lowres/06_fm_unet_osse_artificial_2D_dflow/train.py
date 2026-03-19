@@ -1,7 +1,7 @@
 """
-! -> Artificial Masking with CarbonTracker data by interpolating with noise <-!.
+! -> Masking with OCO-2 setup but Carbontracker data using DFlow <-!.
 
-(flowmatching_20251024_1_unet_masking_interpolate_dev)
+(flowmatching_20251209_1_unet_oco2mask_ct_dev)
 
 Training and evaluation script for Flow Matching models on given data.
 
@@ -93,18 +93,8 @@ ds_stats = xr.open_zarr(
     f"{DEFAULT_TRAINING_DATA_ROOT}/train/carbontracker_{grid}_{vertical_levels}_{freq}_stats.zarr"
 ).compute()
 
-inv_std = {
-    k: 1
-    / (ds_stats[f"{k}_delta"].sel(stats="std").where(lambda x: x > 1e-14, 1).values)
-    ** 2
-    for k in TARGET_VARS  # CARBOSCOPE_CARBON3D_VARS
-}
 
-weights = {k: cos_lat * inv_std[k] for k in inv_std}
-
-LOSS_WEIGHTS = {k: (10 * v / LEN_ALL_TARGET_VARS) for k, v in weights.items()}
-
-METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in TARGET_VARS}
+METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in ["co2massmix"]}
 
 
 MODEL_DIMS = {
@@ -223,22 +213,37 @@ data_path_forecast = Path(
     DEFAULT_FORECAST_DATA_ROOT
 )
 
+generate_data_kwargs = data_kwargs.copy()
+
 generate_kwargs_nested = dict(
     general=dict(
-        n_samples=100,
+        n_samples=7,
+        refine_start=0.9,  # [0, 1], start refine integration steps, 1.0 for no refinement
         avg_over_levels=False,
+    ),
+    data=dict(
+        data_path_generate=DEFAULT_TRAINING_DATA_ROOT + "/train",
+        generate_data_kwargs=generate_data_kwargs,
     ),
     mask=dict(
         masking=True,
-        mask_source="test",  # if masking==True: "oco2" or "test" (for synthetic patterns)
-        mask_pattern="vertical",  # if mask_source=="test": "random", "vertical", "horizontal", "checkerboard", "satellite",
-        masking_method="interpolate",  # if masking=True: "simple", "preserve_global_mean(_and_var)", "total_column_average_add/mult/test"
+        mask_source="oco2",  # if masking==True: "oco2" or "test" (for synthetic patterns)
+        mask_pattern="vertical", # if mask_source=="oco2": "diagonal", "leftright", "topbottom", "checkerboard", "center_box"
         analyze_masking=True,
         obs_fraction=0.3,  # if masking=True and pattern!="oco2": [0, 1]
     ),
     noise=dict(
         noise_pattern=None,  #"spiral_outward_noise", "spiral_noise", "gaussian_noise", "geodesic_noise", "linear_noise"
         analyze_noise=False,
+    ),
+    posterior=dict(
+        posterior_method="dflow",
+        dflow_optimizer="lbfgs",  # "adam", "lbfgs"
+        lbfgs_max_iter_outer=10,
+        lbfgs_max_iter_inner=20,
+        lbfgs_convergence_threshold=1e-3,
+        lbfgs_reg_loss_weight=1e-2,
+        lbfgs_reg_loss=None,  # None, "norm_diff", "l2", "chi_prior",
     ),
 )
 
@@ -297,6 +302,7 @@ def main(
         data_kwargs["data_path"] = training_data_root
     if masking_data_root is not None:
         generate_kwargs["data_path_generate"] = masking_data_root + "/train"
+        generate_data_kwargs["data_path"] = masking_data_root
     if forecast_data_root is not None:
         data_path_forecast = Path(forecast_data_root)
         obs_compare_path = f"{forecast_data_root}/obs_carbontracker_{grid}_{vertical_levels}_{freq}.zarr"
@@ -370,6 +376,6 @@ if __name__ == "__main__":
 # execute via:
 # CUDA_VISIBLE_DEVICES=7 python3 -u
 # /Net/Groups/BGI/work_5/CO2_diffusion/carbonbench/data_assimilation/carbontracker_lowres/
-# 05_fm_unet_osse_artificial_3D_mask/train.py
+# 06_fm_unet_osse_artificial_2D_mask/train.py
 # or:
 # sbatch {path}/train.slurm (check: squeue -u <username>)
