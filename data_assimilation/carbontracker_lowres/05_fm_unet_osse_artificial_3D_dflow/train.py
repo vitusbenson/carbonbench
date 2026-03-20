@@ -1,5 +1,5 @@
 """
-! -> Artificial Masking with CarbonTracker data using D-Flow with LBFGS optimizer and no regularization. Only stable for n_samples < 8 <-!.
+! -> Artificial conditioning with CarbonTracker data using D-Flow with LBFGS optimizer and no regularization. Only stable for n_samples < 8 <-!.
 
 (flowmatching_20251024_1_unet_masking_interpolate_dev)
 

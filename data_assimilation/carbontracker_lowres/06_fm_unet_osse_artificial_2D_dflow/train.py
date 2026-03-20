@@ -1,5 +1,5 @@
 """
-! -> Masking with OCO-2 setup but Carbontracker data using DFlow <-!.
+! -> Conditioning with OCO-2 setup but Carbontracker data using DFlow <-!.
 
 (flowmatching_20251209_1_unet_oco2mask_ct_dev)
 

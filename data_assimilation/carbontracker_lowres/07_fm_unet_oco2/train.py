@@ -1,5 +1,5 @@
 """
-! -> Masking with OCO-2 data <-!.
+! -> Conditioning with OCO-2 data <-!.
 
 (flowmatching_20251205_2_unet_oco2mask_dev)
 
