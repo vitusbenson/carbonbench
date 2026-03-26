@@ -234,6 +234,7 @@ def main():
         gen_eval_kwargs=dict(eval_every_n_epochs=1, n_gt_samples=5, n_gen_samples=20),
         ema_kwargs=dict(decay=0.9999, ema_start_step=1000),
         shared_datamodule=dm,
+        model_sizes=["XS", "S", "M"],  # L is too large for A40 with batch_size=512
     )
 
     n_complete = len([t for t in study.trials if t.state.name == "COMPLETE"])
