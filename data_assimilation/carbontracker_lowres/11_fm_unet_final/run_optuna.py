@@ -1,13 +1,14 @@
 """Optuna hyperparameter sweep for Flow Matching models.
 
-Searches over optimizer, scheduler, architecture size, and FM-specific
-training parameters using Optuna with median pruning.
+Searches over optimizer, scheduler, architecture size, normalization,
+OT coupling, and FM-specific training parameters. Uses a composite
+objective (energy_distance + stability_penalty) with median pruning.
 
 Usage:
-    python run_optuna.py                             # Full sweep (200 trials)
-    python run_optuna.py --smoke                     # Smoke test (2 trials, 50 steps)
-    python run_optuna.py --n-trials 50 --max-steps 5000
-    CUDA_VISIBLE_DEVICES=7 python run_optuna.py --smoke
+    python run_optuna.py                                    # Full sweep (7 trials per worker)
+    python run_optuna.py --smoke                            # Smoke test (2 trials, 50 steps)
+    python run_optuna.py --n-trials 10 --max-steps 5000
+    python run_optuna.py --analyze-only                     # Post-hoc analysis only
 """
 
 import argparse
@@ -22,7 +23,6 @@ from neural_transport.datasets.grids import (
     LATLON_PROTOTYPE_COORDS,
     VERTICAL_LAYERS_PROTOTYPE_COORDS,
 )
-from neural_transport.training.study_analysis import analyze_study
 from neural_transport.training.tuning import MODEL_SIZES, run_optuna_study
 
 torch.set_float32_matmul_precision("high")
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────
 
-DEFAULT_TRAINING_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker"
+DEFAULT_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker"
 
 TARGET_VARS = ["co2massmix"]
 GRID = "latlon5.625"
@@ -43,22 +43,21 @@ FREQ = "6h"
 EXP_DIR = Path(__file__).resolve().parent
 
 
-def build_base_configs(training_data_root: str, max_steps: int = 3000):
-    """Build base configurations matching 11_fm_unet_final."""
-
+def build_base_configs(data_root, max_steps=3000, batch_size=512):
+    """Build base configurations. Optuna overrides model_size, lr, etc."""
     nlev = len(VERTICAL_LAYERS_PROTOTYPE_COORDS[VERTICAL_LEVELS]["level"])
     lat = LATLON_PROTOTYPE_COORDS[GRID]["lat"]
     lon = LATLON_PROTOTYPE_COORDS[GRID]["lon"]
 
     LEN_ALL_TARGET_VARS = nlev * len(TARGET_VARS)
-    LEN_ALL_VARS = LEN_ALL_TARGET_VARS
 
     cos_lat = np.cos(np.radians(lat))[:, None, None].repeat(len(lon), axis=1).reshape(-1, 1)
     cos_lat = cos_lat / np.mean(cos_lat)
-
     METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in TARGET_VARS}
 
-    # Base model config — will be overridden by Optuna for model_size, OT, etc.
+    # Default model size (S) — Optuna will override
+    default_size = MODEL_SIZES["S"]
+
     regulargrid_kwargs = dict(
         input_vars=TARGET_VARS,
         target_vars=TARGET_VARS,
@@ -71,9 +70,6 @@ def build_base_configs(training_data_root: str, max_steps: int = 3000):
         targshift=True,
     )
 
-    # Default model size (S) — Optuna will override embed_dim and filters
-    default_size = MODEL_SIZES["S"]
-
     wrapper_kwargs = dict(
         **regulargrid_kwargs,
         model_kwargs=dict(
@@ -81,11 +77,11 @@ def build_base_configs(training_data_root: str, max_steps: int = 3000):
             model_kwargs=dict(
                 **regulargrid_kwargs,
                 model_kwargs=dict(
-                    in_chans=LEN_ALL_VARS + 1,
+                    in_chans=LEN_ALL_TARGET_VARS + 1,
                     out_chans=LEN_ALL_TARGET_VARS,
                     embed_dim=default_size["embed_dim"],
                     act="leakyrelu",
-                    norm="batch",
+                    norm="group",
                     enc_filters=default_size["enc_filters"],
                     dec_filters=default_size["dec_filters"],
                     in_interpolation="bilinear",
@@ -98,7 +94,7 @@ def build_base_configs(training_data_root: str, max_steps: int = 3000):
             method="midpoint",
             nlev=nlev,
             step_size=0.2,
-            use_ot_coupling=True,
+            use_ot_coupling=False,
             time_sampling="uniform",
             time_sampling_kwargs=None,
             time_loss_weight=None,
@@ -120,8 +116,8 @@ def build_base_configs(training_data_root: str, max_steps: int = 3000):
         lr_shedule_kwargs=dict(
             warmup_steps=500,
             halfcosine_steps=10000,
-            min_lr=1.448612222179744e-07,
-            max_lr=0.8001606601982787,
+            min_lr=1e-7,
+            max_lr=0.8,
         ),
         val_dataloader_names=["singlestep"],
         plot_kwargs=dict(
@@ -136,13 +132,13 @@ def build_base_configs(training_data_root: str, max_steps: int = 3000):
     )
 
     data_kwargs = dict(
-        data_path=training_data_root,
+        data_path=data_root,
         dataset="carbontracker",
         grid=GRID,
         vertical_levels=VERTICAL_LEVELS,
         freq=FREQ,
         n_timesteps=1,
-        batch_size_train=512,
+        batch_size_train=batch_size,
         batch_size_pred=32,
         num_workers=0,
         val_rollout_n_timesteps=None,
@@ -169,11 +165,12 @@ def main():
     parser.add_argument("--n-trials", type=int, default=7,
                         help="Trials per worker (default 7; 32 workers × 7 = 224 total)")
     parser.add_argument("--max-steps", type=int, default=3000)
+    parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--study-name", type=str, default="fm_tuning")
     parser.add_argument("--training-data-root", type=str, default=None)
-    parser.add_argument("--smoke", action="store_true", help="Smoke test: 2 trials, 50 steps")
+    parser.add_argument("--smoke", action="store_true", help="2 trials, 50 steps")
     parser.add_argument("--analyze-only", action="store_true",
-                        help="Skip trials, just run analysis on existing study DB")
+                        help="Skip trials, just run analysis on existing study")
     args = parser.parse_args()
 
     if args.smoke:
@@ -181,24 +178,23 @@ def main():
         args.max_steps = 50
 
     run_dir = EXP_DIR / "optuna_runs"
-    storage = f"sqlite:///{EXP_DIR / 'optuna_fm_study.db'}"
+    storage = f"sqlite:///{EXP_DIR / 'optuna_study.db'}"
 
     if args.analyze_only:
         import optuna
+        from neural_transport.training.study_analysis import analyze_study
+
         study = optuna.load_study(study_name=args.study_name, storage=storage)
 
-        # Clean up zombie trials from SIGTERM'd workers (mark RUNNING → FAIL)
+        # Clean up zombie trials
         zombies = [t for t in study.trials if t.state == optuna.trial.TrialState.RUNNING]
         if zombies:
-            logger.info("Cleaning up %d zombie RUNNING trials: %s",
-                        len(zombies), [t.number for t in zombies])
+            logger.info("Cleaning up %d zombie RUNNING trials", len(zombies))
             from optuna.storages import RDBStorage
             st = RDBStorage(storage)
             for t in zombies:
                 st.set_trial_state_values(t._trial_id, state=optuna.trial.TrialState.FAIL)
-            # Reload study after cleanup
             study = optuna.load_study(study_name=args.study_name, storage=storage)
-            logger.info("Zombie trials marked as FAIL")
 
         analysis_dir = EXP_DIR / "analysis"
         analyze_study(study, out_dir=analysis_dir, run_dir=run_dir)
@@ -206,21 +202,21 @@ def main():
         logger.info("Best params: %s", study.best_params)
         return
 
-    training_data_root = args.training_data_root or DEFAULT_TRAINING_DATA_ROOT
+    data_root = args.training_data_root or DEFAULT_DATA_ROOT
 
     lit_module_kwargs, data_kwargs, trainer_kwargs = build_base_configs(
-        training_data_root, max_steps=args.max_steps
+        data_root, max_steps=args.max_steps, batch_size=args.batch_size,
     )
 
     import os
     worker_id = os.environ.get("SLURM_ARRAY_TASK_ID", "0")
 
     logger.info(
-        "Starting Optuna worker %s: %d trials, %d max_steps each",
-        worker_id, args.n_trials, args.max_steps,
+        "Starting Optuna worker %s: %d trials, %d steps, batch=%d",
+        worker_id, args.n_trials, args.max_steps, args.batch_size,
     )
 
-    # Pre-load data once — shared across all trials to avoid reloading ~40GB per trial
+    # Pre-load data once — shared across all trials
     from neural_transport.datamodule import CarbonDataModule
     dm = CarbonDataModule(**data_kwargs)
     dm.setup("fit")
@@ -241,7 +237,7 @@ def main():
     )
 
     n_complete = len([t for t in study.trials if t.state.name == "COMPLETE"])
-    logger.info("Worker %s done. Study has %d complete trials. Best: %.6f",
+    logger.info("Worker %s done. %d complete trials. Best: %.6f",
                 worker_id, n_complete, study.best_value)
 
 

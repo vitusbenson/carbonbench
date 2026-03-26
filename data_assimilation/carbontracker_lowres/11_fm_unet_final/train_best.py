@@ -1,12 +1,12 @@
 """Train the best model from Optuna sweep to convergence.
 
-Reads the best hyperparameters from the Optuna SQLite database,
-then runs full train_and_eval_singlestep with distributional evaluation.
+Reads best hyperparameters from the Optuna SQLite database,
+then runs full training with distributional evaluation.
 
 Usage:
-    python train_best.py --study-db optuna_fm_study.db
-    python train_best.py --smoke --study-db optuna_fm_study.db   # 100 steps
-    CUDA_VISIBLE_DEVICES=7 python train_best.py --smoke --study-db optuna_fm_study.db
+    python train_best.py --study-db optuna_study.db
+    python train_best.py --study-db optuna_study.db --smoke
+    python train_best.py --study-db optuna_study.db --only-pred --ckpt best
 """
 
 import argparse
@@ -14,7 +14,6 @@ import logging
 from pathlib import Path
 
 import numpy as np
-import optuna
 import pytorch_lightning as pl
 import torch
 
@@ -34,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────
 
-DEFAULT_TRAINING_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker"
+DEFAULT_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker"
 
 TARGET_VARS = ["co2massmix"]
 GRID = "latlon5.625"
@@ -45,40 +44,41 @@ EXP_DIR = Path(__file__).resolve().parent
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train best FM model from Optuna sweep")
-    parser.add_argument("--study-db", type=str, required=True, help="Path to Optuna SQLite DB")
+    parser = argparse.ArgumentParser(description="Train best FM model from Optuna")
+    parser.add_argument("--study-db", type=str, required=True)
     parser.add_argument("--study-name", type=str, default="fm_tuning")
     parser.add_argument("--max-steps", type=int, default=10000)
+    parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--training-data-root", type=str, default=None)
-    parser.add_argument("--smoke", action="store_true", help="Smoke test: 100 steps")
-    parser.add_argument("--only-pred", action="store_true", help="Skip training, eval only")
+    parser.add_argument("--smoke", action="store_true", help="100 steps")
+    parser.add_argument("--only-pred", action="store_true")
     parser.add_argument("--ckpt", type=str, default="best")
     args = parser.parse_args()
 
     if args.smoke:
         args.max_steps = 100
 
-    training_data_root = args.training_data_root or DEFAULT_TRAINING_DATA_ROOT
+    data_root = args.training_data_root or DEFAULT_DATA_ROOT
 
-    # Load best config from Optuna
+    # Load best config
+    import optuna
     storage = f"sqlite:///{Path(args.study_db).resolve()}"
     study = optuna.load_study(study_name=args.study_name, storage=storage)
     best = get_best_config(study)
 
     logger.info("Best trial #%d (value=%.6f)", best["best_trial_number"], best["best_value"])
-    logger.info("Best params: %s", {k: v for k, v in best.items() if k not in ("best_value", "best_trial_number")})
+    logger.info("Best params: %s", {k: v for k, v in best.items()
+                                     if k not in ("best_value", "best_trial_number")})
 
-    # Build config from best params
+    # Build config
     nlev = len(VERTICAL_LAYERS_PROTOTYPE_COORDS[VERTICAL_LEVELS]["level"])
     lat = LATLON_PROTOTYPE_COORDS[GRID]["lat"]
     lon = LATLON_PROTOTYPE_COORDS[GRID]["lon"]
 
     LEN_ALL_TARGET_VARS = nlev * len(TARGET_VARS)
-    LEN_ALL_VARS = LEN_ALL_TARGET_VARS
 
     cos_lat = np.cos(np.radians(lat))[:, None, None].repeat(len(lon), axis=1).reshape(-1, 1)
     cos_lat = cos_lat / np.mean(cos_lat)
-
     METRIC_WEIGHTS = {f"{k}_delta": cos_lat for k in TARGET_VARS}
 
     model_size_config = MODEL_SIZES[best["model_size"]]
@@ -102,11 +102,11 @@ def main():
             model_kwargs=dict(
                 **regulargrid_kwargs,
                 model_kwargs=dict(
-                    in_chans=LEN_ALL_VARS + 1,
+                    in_chans=LEN_ALL_TARGET_VARS + 1,
                     out_chans=LEN_ALL_TARGET_VARS,
                     embed_dim=model_size_config["embed_dim"],
                     act="leakyrelu",
-                    norm=best.get("norm", "batch"),
+                    norm=best.get("norm", "group"),
                     enc_filters=model_size_config["enc_filters"],
                     dec_filters=model_size_config["dec_filters"],
                     in_interpolation="bilinear",
@@ -143,7 +143,7 @@ def main():
         lr_shedule_kwargs=dict(
             warmup_steps=best["warmup_steps"],
             halfcosine_steps=best.get("halfcosine_steps", 10000),
-            min_lr=1.448612222179744e-07,
+            min_lr=1e-7,
             max_lr=best["max_lr"],
         ),
         val_dataloader_names=["singlestep"],
@@ -159,13 +159,13 @@ def main():
     )
 
     data_kwargs = dict(
-        data_path=training_data_root,
+        data_path=data_root,
         dataset="carbontracker",
         grid=GRID,
         vertical_levels=VERTICAL_LEVELS,
         freq=FREQ,
         n_timesteps=1,
-        batch_size_train=1536,
+        batch_size_train=args.batch_size,
         batch_size_pred=32,
         num_workers=0,
         val_rollout_n_timesteps=None,
@@ -190,18 +190,14 @@ def main():
         avg_over_levels=False,
     )
 
-    data_path_forecast = Path(training_data_root) / "test"
-
     ema_callback = EMACallback(decay=0.9999, ema_start_step=1000)
 
-    run_dir = EXP_DIR
-
     train_and_eval_singlestep(
-        run_dir,
+        EXP_DIR,
         data_kwargs,
         lit_module_kwargs,
         trainer_kwargs,
-        data_path_forecast,
+        Path(data_root) / "test",
         device="cuda",
         freq="QS",
         train=not args.only_pred,
