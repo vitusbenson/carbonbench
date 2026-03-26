@@ -106,7 +106,7 @@ def main():
                     out_chans=LEN_ALL_TARGET_VARS,
                     embed_dim=model_size_config["embed_dim"],
                     act="leakyrelu",
-                    norm="batch",
+                    norm=best.get("norm", "batch"),
                     enc_filters=model_size_config["enc_filters"],
                     dec_filters=model_size_config["dec_filters"],
                     in_interpolation="bilinear",
