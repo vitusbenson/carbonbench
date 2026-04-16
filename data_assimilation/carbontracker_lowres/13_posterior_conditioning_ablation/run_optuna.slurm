@@ -1,58 +1,46 @@
 #!/bin/bash
-#SBATCH --partition gpu
-#SBATCH --time=48:00:00
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
+#SBATCH --job-name=optuna_all
+#SBATCH --output=slurm_optuna_%A_%a.out
+#SBATCH --error=slurm_optuna_%A_%a.err
+#SBATCH --time=06:00:00
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --mem=120G
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=240000
-#SBATCH --gres=gpu:A100:1
-#SBATCH --job-name=posterior_tuning
-#SBATCH --mail-type=END
-#SBATCH -o /Net/Groups/BGI/people/vbenson/CarbonBench/dryrun/carbonbench/data_assimilation/carbontracker_lowres/13_posterior_conditioning_ablation/slurm_optuna_%A.out
+#SBATCH --array=0-89
 
+# Unified Optuna sweep: 9 methods x 10 workers = 90 array tasks
+# Each worker runs 5 trials → 50 trials per method, 450 total
+#
+# Task mapping:
+#   0-9   = dps     (workers 0-9)
+#   10-19 = flowdps (workers 0-9)
+#   20-29 = sde     (workers 0-9)
+#   30-39 = fig     (workers 0-9)
+#   40-49 = ictm    (workers 0-9)
+#   50-59 = mcg     (workers 0-9)
+#   60-69 = pcfm    (workers 0-9)
+#   70-79 = fmps    (workers 0-9)
+#   80-89 = dflow   (workers 0-9)
 
-source activate neuraltransport
+METHODS=(dps flowdps sde fig ictm mcg pcfm fmps dflow)
+N_WORKERS=10
+TRIALS_PER_WORKER=5
 
-export NCCL_DEBUG=INFO
-export PYTHONFAULTHANDLER=1
+METHOD_IDX=$((SLURM_ARRAY_TASK_ID / N_WORKERS))
+WORKER_ID=$((SLURM_ARRAY_TASK_ID % N_WORKERS))
+METHOD=${METHODS[$METHOD_IDX]}
 
-echo "Starting posterior sampler Optuna tuning at: $(date)"
-printenv
-echo "TMPDIR: $TEMPDIR"
+echo "Optuna worker ${WORKER_ID}/${N_WORKERS} for ${METHOD}: $(date)"
+echo "Node: $(hostname), GPU: $CUDA_VISIBLE_DEVICES, Array task: $SLURM_ARRAY_TASK_ID"
 
-# --- Scratch setup ---
-LOCAL_DIR="/scratch/vbenson/${SLURM_JOB_ID:?}/Carbontracker"
-REMOTE_DIR="/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker/"
-SUBMIT_DIR="${SLURM_SUBMIT_DIR:?}"
+cd /Net/Groups/BGI/people/vbenson/CarbonBench/dryrun/carbonbench/data_assimilation/carbontracker_lowres/13_posterior_conditioning_ablation
 
-mkdir -p "${LOCAL_DIR}"
+python run_optuna.py \
+    --method $METHOD \
+    --n-trials $TRIALS_PER_WORKER \
+    --n-targets 20 \
+    --n-samples 20 \
+    --worker-id $WORKER_ID
 
-function clean_up {
-    echo "Cleaning up local scratch at $(date)"
-    cd "${SUBMIT_DIR}" || exit
-    rm -rf "${LOCAL_DIR:?}"
-    echo "Cleanup done."
-    exit
-}
-
-trap 'clean_up' EXIT
-
-# --- Copy test data ---
-for split in test
-do
-    mkdir -p "${LOCAL_DIR}/${split}"
-    for file in carbontracker_latlon5.625_l10_6h.zarr carbontracker_latlon5.625_l10_6h_stats.zarr obs_carbontracker_latlon5.625_l10_6h.zarr
-    do
-        if [ -d "${REMOTE_DIR}/${split}/${file}" ]; then
-            echo "Copying ${split} ${file}"
-            cp -r "${REMOTE_DIR}/${split}/${file}" "${LOCAL_DIR}/${split}/${file}"
-        fi
-    done
-done
-
-OUT_DIR=/Net/Groups/BGI/people/vbenson/CarbonBench/dryrun/carbonbench/data_assimilation/carbontracker_lowres/13_posterior_conditioning_ablation
-
-# Run Optuna tuning for all methods
-srun python3 -u $OUT_DIR/run_optuna.py --device cuda --n-trials 50 --n-targets 10 --n-samples 20
-
-echo "Finished posterior sampler Optuna tuning at: $(date)"
+echo "Done worker ${WORKER_ID} for ${METHOD}: $(date)"

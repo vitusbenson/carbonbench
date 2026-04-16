@@ -1,13 +1,11 @@
-"""Multi-target comparison of best posterior sampling methods (Phase 23).
+"""Unified method comparison: load best Optuna config per method, generate ensembles.
 
-For each method: generates 10 ensemble members for each of 20 target
-samples, using GPU-efficient batched generation with streaming zarr writes.
+Designed for SLURM array jobs: each task runs one method.
 
 Usage:
-    python compare_methods.py                     # all methods
-    python compare_methods.py --method sde        # single method
-    python compare_methods.py --n-targets 5 --n-samples 3  # quick test
-    python compare_methods.py --plot-only         # regenerate plots from existing zarr
+    python compare_methods.py --method fmps          # single method
+    python compare_methods.py                         # all methods
+    python compare_methods.py --list                  # show available methods
 """
 
 import argparse
@@ -18,23 +16,21 @@ from pathlib import Path
 
 import numpy as np
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-CARBONBENCH_ROOT = Path(__file__).resolve().parent.parent
 EXP_DIR = Path(__file__).resolve().parent
+CARBONBENCH_ROOT = EXP_DIR.parent
 MODEL_DIRS = [
     CARBONBENCH_ROOT / "11_fm_unet_final",
     CARBONBENCH_ROOT / "09_fm_unet_ot_training",
     CARBONBENCH_ROOT / "01_fm_unet_training_baseline",
 ]
 
-# Data paths
 LOCAL_DATA = Path("/scratch/vbenson") / "Carbontracker"
 REMOTE_DATA = Path("/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker")
+
+ALL_METHODS = ["unconditional", "dps", "flowdps", "sde", "fig", "ictm", "mcg", "pcfm", "fmps", "dflow"]
 
 
 def get_data_path():
@@ -48,7 +44,7 @@ def get_base_config():
     from neural_transport.configs import GenerateConfig
 
     return GenerateConfig(
-        n_samples=10,
+        n_samples=20,
         steps=21,
         refine_start=1.0,
         avg_over_levels=False,
@@ -67,6 +63,7 @@ def get_base_config():
         sampler_params={
             "sigma_obs": 0.1,
             "spatial_smoothing_sigma": 0.0,
+            "soft_boundary_sigma": 0.0,
             "fresh_noise": True,
         },
         analyze_masking=False,
@@ -75,37 +72,34 @@ def get_base_config():
     )
 
 
-def load_best_method_configs():
-    """Load best config per method from Optuna study summaries."""
-    from neural_transport.configs import compat_to_generate_kwargs
-    from neural_transport.inference.tuning import METHODS, _build_generate_config, _reconstruct_method_params
+def load_best_configs():
+    """Load best Optuna config for each method from optuna_runs/."""
+    from neural_transport.inference.tuning import _build_generate_config, _reconstruct_method_params
 
-    base_config = get_base_config()
-    method_configs = {}
+    base = get_base_config()
+    configs = {"unconditional": base.merge(**{"conditioning.masking": False})}
 
-    for method in METHODS:
+    for method in ["dps", "flowdps", "sde", "fig", "ictm", "mcg", "pcfm", "fmps", "dflow"]:
         summary_path = EXP_DIR / "optuna_runs" / method / "study_summary.json"
         if not summary_path.exists():
-            logger.warning("No study summary for %s at %s", method, summary_path)
+            logger.warning("No study summary for %s, skipping", method)
             continue
-
         summary = json.loads(summary_path.read_text())
-        best_params = summary["best_params"]
-        method_params = _reconstruct_method_params(method, best_params)
-        config = _build_generate_config(method_params, base_config)
-        method_configs[method] = config
-        logger.info("Best %s: objective=%.4f, params=%s", method, summary["best_objective"], best_params)
+        if summary.get("n_complete", 0) == 0:
+            logger.warning("No completed trials for %s, skipping", method)
+            continue
+        params = _reconstruct_method_params(method, summary["best_params"])
+        configs[method] = _build_generate_config(params, base)
+        logger.info("Loaded %s: best_objective=%.4f", method, summary["best_objective"])
 
-    return method_configs
+    return configs
 
 
 def run_method(method_name, model, dataset, target_indices, config, args):
-    """Run multi-target generation for one method, return zarr path."""
     from neural_transport.configs import compat_to_generate_kwargs
     from neural_transport.inference.generation import generate_multi_target
 
     generate_kwargs = compat_to_generate_kwargs(config)
-
     method_dir = EXP_DIR / "results" / method_name
     method_dir.mkdir(parents=True, exist_ok=True)
 
@@ -125,7 +119,6 @@ def run_method(method_name, model, dataset, target_indices, config, args):
     )
     wall_time = time.perf_counter() - t0
 
-    # Save timing and config
     info = {
         "method": method_name,
         "wall_time_sec": wall_time,
@@ -136,31 +129,32 @@ def run_method(method_name, model, dataset, target_indices, config, args):
     with open(method_dir / "method_info.json", "w") as f:
         json.dump(info, f, indent=2, default=str)
 
-    logger.info("%s: completed in %.1fs → %s", method_name, wall_time, zarr_path)
+    logger.info("%s: completed in %.1fs", method_name, wall_time)
     return zarr_path
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Multi-target posterior method comparison")
+    parser = argparse.ArgumentParser(description="Unified method comparison")
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--n-targets", type=int, default=20)
-    parser.add_argument("--n-samples", type=int, default=10)
+    parser.add_argument("--n-samples", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--method", type=str, default=None, help="Run single method")
-    parser.add_argument("--plot-only", action="store_true")
+    parser.add_argument("--method", type=str, default=None,
+                        help="Run a single method (for SLURM array jobs)")
+    parser.add_argument("--list", action="store_true", help="List available methods and exit")
     args = parser.parse_args()
 
-    if args.plot_only:
-        from plot_results import plot_all
-        plot_all(EXP_DIR)
+    method_configs = load_best_configs()
+
+    if args.list:
+        print("Available methods:", list(method_configs.keys()))
         return
 
-    from neural_transport.configs import DataConfig, compat_to_generate_kwargs
+    from neural_transport.configs import DataConfig
     from neural_transport.data.inference_loader import InferenceDataLoader
     from neural_transport.training.train import load_model
 
-    # Load model
     model = None
     for model_dir in MODEL_DIRS:
         try:
@@ -172,7 +166,6 @@ def main():
     if model is None:
         raise RuntimeError(f"Could not load model from any of: {MODEL_DIRS}")
 
-    # Load dataset
     data_config = DataConfig(
         dataset="carbontracker", grid="latlon5.625", vertical_levels="l10",
         freq="6h", target_vars=["co2massmix", "p_bottom", "p_top"], forcing_vars=[],
@@ -181,41 +174,24 @@ def main():
     loader = InferenceDataLoader(data_config, data_path=data_path)
     dataset = loader.load_dataset()
 
-    # Random target indices (reproducible)
+    # Same random targets as Optuna tuning (seed=42)
     rng = np.random.RandomState(args.seed)
-    n_available = len(dataset)
-    target_indices = sorted(rng.choice(n_available, size=min(args.n_targets, n_available), replace=False).tolist())
-    logger.info("Selected %d target indices: %s", len(target_indices), target_indices)
+    target_indices = sorted(rng.choice(len(dataset), size=min(args.n_targets, len(dataset)), replace=False).tolist())
 
-    # Save target indices for reproducibility
     results_dir = EXP_DIR / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
     with open(results_dir / "target_indices.json", "w") as f:
-        json.dump({"target_indices": target_indices, "seed": args.seed}, f, indent=2)
+        json.dump({"target_indices": target_indices, "seed": args.seed, "n_dataset": len(dataset)}, f, indent=2)
 
-    # Load best configs
-    method_configs = load_best_method_configs()
-
-    # Add unconditional baseline
-    base_config = get_base_config()
-    uncond_config = base_config.merge(**{"conditioning.masking": False})
-    method_configs = {"unconditional": uncond_config, **method_configs}
-
-    # Run selected methods
     methods_to_run = [args.method] if args.method else list(method_configs.keys())
-
     for method_name in methods_to_run:
         if method_name not in method_configs:
-            logger.warning("No config for method %s, skipping", method_name)
+            logger.warning("No config for %s, skipping", method_name)
             continue
         logger.info("=" * 60)
-        logger.info("Running method: %s", method_name)
+        logger.info("Running: %s", method_name)
         logger.info("=" * 60)
         run_method(method_name, model, dataset, target_indices, method_configs[method_name], args)
-
-    # Generate plots
-    from plot_results import plot_all
-    plot_all(EXP_DIR)
 
 
 if __name__ == "__main__":

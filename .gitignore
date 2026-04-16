@@ -201,6 +201,8 @@ transport_models/carbontracker_origres/flowmatching_dev
 **/comparison/
 **/diagnosis_results/
 **/val_ds/
+**/quick_check_results/
+**/results/
 slurm_*.out
 *.ckpt
 events.out.tfevents.*

@@ -1,63 +1,63 @@
-"""Optuna tuning for all posterior sampling methods (Phase 23).
+"""Unified Optuna tuning for all posterior conditioning methods.
 
-Runs one Optuna study per method (DPS, FlowDPS, SDE, FIG, ICTM) using
-satellite mask patterns on CarbonTracker test data. Each trial evaluates
-pressure-weighted RMSE of the ensemble mean vs ground truth.
+Tunes one method per invocation. Multiple workers can share the same
+Optuna study via SQLite storage for parallelism.
+
+Methods: dps, flowdps, sde, fig, ictm, mcg, pcfm, fmps
 
 Usage:
-    python run_optuna.py                          # all methods
-    python run_optuna.py --method flowdps         # single method
-    python run_optuna.py --method sde --n-trials 100
-    python run_optuna.py --device cpu             # for testing
+    python run_optuna.py --method fmps --n-trials 5 --worker-id 0
+    python run_optuna.py --method dps --n-trials 50   # single worker, all trials
 """
 
 import argparse
 import logging
+import time
 from pathlib import Path
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-CARBONBENCH_ROOT = Path(__file__).resolve().parent.parent
 EXP_DIR = Path(__file__).resolve().parent
+CARBONBENCH_ROOT = EXP_DIR.parent
 MODEL_DIRS = [
     CARBONBENCH_ROOT / "11_fm_unet_final",
     CARBONBENCH_ROOT / "09_fm_unet_ot_training",
     CARBONBENCH_ROOT / "01_fm_unet_training_baseline",
 ]
 
-# Data paths
 LOCAL_DATA = Path("/scratch/vbenson") / "Carbontracker"
 REMOTE_DATA = Path("/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker")
 
+ALL_METHODS = ["dps", "flowdps", "sde", "fig", "ictm", "mcg", "pcfm", "fmps", "dflow"]
+
 
 def get_data_path():
-    """Find data path, preferring local scratch."""
     for base in [LOCAL_DATA, REMOTE_DATA]:
-        test_path = base / "test"
-        if test_path.exists():
-            return str(test_path)
+        if (base / "test").exists():
+            return str(base / "test")
     raise FileNotFoundError(f"No test data found at {LOCAL_DATA} or {REMOTE_DATA}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Posterior sampler Optuna tuning")
-    parser.add_argument("--method", type=str, default=None,
-                        choices=["dps", "flowdps", "sde", "fig", "ictm"],
-                        help="Method to tune (default: all)")
-    parser.add_argument("--n-trials", type=int, default=50)
-    parser.add_argument("--n-targets", type=int, default=10)
+    parser = argparse.ArgumentParser(description="Unified Optuna tuning for posterior conditioning")
+    parser.add_argument("--method", type=str, required=True, choices=ALL_METHODS)
+    parser.add_argument("--n-trials", type=int, default=5,
+                        help="Trials per worker (total = n_workers * n_trials)")
+    parser.add_argument("--n-targets", type=int, default=20)
     parser.add_argument("--n-samples", type=int, default=20)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--worker-id", type=int, default=0,
+                        help="Worker ID for seed offset (use SLURM array task modulo)")
     args = parser.parse_args()
 
+    # Each worker gets a unique seed for TPE exploration diversity
+    args.seed = args.seed + args.worker_id
+
     from neural_transport.configs import DataConfig, GenerateConfig
-    from neural_transport.data.inference_loader import GridInfo
-    from neural_transport.inference.tuning import METHODS, run_posterior_study
+    from neural_transport.data.inference_loader import GridInfo, InferenceDataLoader
+    from neural_transport.inference.tuning import run_posterior_study
     from neural_transport.training.train import load_model
 
     # Load model
@@ -79,8 +79,6 @@ def main():
     )
     grid_info = GridInfo.from_config(data_config)
     data_path = get_data_path()
-
-    from neural_transport.data.inference_loader import InferenceDataLoader
     loader = InferenceDataLoader(data_config, data_path=data_path)
     dataset = loader.load_dataset()
 
@@ -105,6 +103,7 @@ def main():
         sampler_params={
             "sigma_obs": 0.1,
             "spatial_smoothing_sigma": 0.0,
+            "soft_boundary_sigma": 0.0,
             "fresh_noise": True,
         },
         analyze_masking=False,
@@ -112,44 +111,69 @@ def main():
         analyze_noise=False,
     )
 
-    methods = [args.method] if args.method else METHODS
+    method = args.method
+    run_dir = EXP_DIR / "optuna_runs" / method
+    storage = f"sqlite:///{EXP_DIR / 'optuna_runs' / f'{method}_study.db'}"
+    study_name = f"posterior_{method}"
 
-    for method in methods:
-        logger.info("=" * 60)
-        logger.info("Starting Optuna study for method: %s", method)
-        logger.info("=" * 60)
+    run_dir.mkdir(parents=True, exist_ok=True)
 
-        run_dir = EXP_DIR / "optuna_runs" / method
-        storage = f"sqlite:///{EXP_DIR / 'optuna_runs' / f'{method}_study.db'}"
+    # Worker 0 creates the study; others wait for the DB file
+    import optuna
 
-        study = run_posterior_study(
-            method=method,
-            model=model,
-            dataset=dataset,
-            grid_info=grid_info,
-            base_config=base_config,
-            study_name=f"posterior_{method}",
+    if args.worker_id == 0:
+        optuna.create_study(
+            study_name=study_name,
             storage=storage,
-            run_dir=run_dir,
-            target_vars=["co2massmix"],
-            n_trials=args.n_trials,
-            n_targets=args.n_targets,
-            n_samples=args.n_samples,
-            nan_penalty=100.0,
-            device=args.device,
-            seed=args.seed,
+            direction="minimize",
+            load_if_exists=True,
         )
+        logger.info("Worker 0: study '%s' created/loaded", study_name)
+    else:
+        db_path = EXP_DIR / "optuna_runs" / f"{method}_study.db"
+        for _ in range(120):
+            if db_path.exists():
+                break
+            time.sleep(1)
+        logger.info("Worker %d: study DB found, joining", args.worker_id)
 
-        # Run analysis
+    logger.info("=" * 60)
+    logger.info("Optuna worker %d for %s: %d trials, %d targets x %d samples",
+                args.worker_id, method.upper(), args.n_trials, args.n_targets, args.n_samples)
+    logger.info("=" * 60)
+
+    study = run_posterior_study(
+        method=method,
+        model=model,
+        dataset=dataset,
+        grid_info=grid_info,
+        base_config=base_config,
+        study_name=study_name,
+        storage=storage,
+        run_dir=run_dir,
+        target_vars=["co2massmix"],
+        n_trials=args.n_trials,
+        n_targets=args.n_targets,
+        n_samples=args.n_samples,
+        nan_penalty=100.0,
+        device=args.device,
+        seed=args.seed,
+    )
+
+    n_complete = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
+    logger.info("Worker %d done. Study '%s' has %d complete trials.", args.worker_id, study_name, n_complete)
+
+    if n_complete > 0:
+        logger.info("Best trial: #%d, value=%.4f", study.best_trial.number, study.best_value)
+        logger.info("Best params: %s", study.best_params)
+
+    # Only worker 0 runs analysis
+    if args.worker_id == 0:
         try:
             from neural_transport.training.study_analysis import analyze_study
-            analyze_study(
-                study,
-                out_dir=EXP_DIR / "analysis" / method,
-                run_dir=run_dir,
-            )
+            analyze_study(study, out_dir=EXP_DIR / "analysis" / method, run_dir=run_dir)
         except Exception as e:
-            logger.warning("Study analysis failed for %s: %s", method, e)
+            logger.warning("Study analysis failed: %s", e)
 
 
 if __name__ == "__main__":

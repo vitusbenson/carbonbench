@@ -124,6 +124,30 @@ Current Limitations:
 - Masking patterns remain as an artifact in the generated samples.
 - The transition from artificial 3D observational data to satellite-based 2D observational data leads to a significant performance drop, which is an open challenge.
 
+## Experiment Storage Convention
+
+Generated artifacts (checkpoints, predictions, Optuna trials, plots) live on **tscratch** to keep the home drive lean. Source code (`*.py`, `*.slurm`) stays in place.
+
+```
+/Net/Groups/BGI/tscratch/vbenson/carbonbench_artifacts/{base}/{experiment_name}/
+  ├── results/
+  ├── singlestep/
+  ├── optuna_runs/
+  ├── analysis/
+  └── ...
+```
+
+Symlinks in each experiment directory point to tscratch, so all scripts work transparently.
+
+**Setup for a new experiment:**
+```bash
+bash scripts/setup_experiment_storage.sh <experiment_name>
+# For non-default base directories:
+bash scripts/setup_experiment_storage.sh --base carbontracker_lowres_xco2 <experiment_name>
+```
+
+The script is idempotent — safe to re-run. It migrates existing artifact directories and creates symlinks.
+
 ## Installation
 
 Make sure to install [NeuralTransport](https://github.com/vitusbenson/neural_transport), then you should be able to run the scripts.

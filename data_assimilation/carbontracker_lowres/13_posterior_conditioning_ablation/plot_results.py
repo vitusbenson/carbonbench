@@ -1,24 +1,16 @@
-"""Publication-quality plots for posterior conditioning comparison (Phase 23).
+"""Plot results from the unified posterior conditioning comparison.
 
-Loads multi-target zarr data, builds OSSEResult objects, and generates:
-- Per-method conditioning diagnostics (from toolkit)
-- Cross-method comparison bars and Pareto front
-- Per-target sample galleries
-- Obs match scatter and spread at unobserved locations
-- Optuna analysis
+Uses library functions from neural_transport.plots and neural_transport.evaluation.
 
 Usage:
     python plot_results.py
-    python plot_results.py --exp-dir /path/to/experiment
 """
 
-import argparse
 import json
 import logging
 from pathlib import Path
 
 import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 
 matplotlib.use("Agg")
@@ -27,291 +19,289 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger(__name__)
 
 EXP_DIR = Path(__file__).resolve().parent
-METHODS = ["dps", "flowdps", "sde", "fig", "ictm"]
-ALL_METHODS = ["unconditional"] + METHODS
-
-
-# ── Load multi-target zarr data ──────────────────────────────────────────
+ALL_METHODS = ["unconditional", "dps", "flowdps", "sde", "fig", "ictm", "mcg", "pcfm", "fmps", "dflow"]
 
 
 def load_multitarget_zarr(method_dir):
-    """Load multi-target predictions from zarr store.
-
-    Returns dict with numpy arrays: predictions, gt, obs_mask, obs_values, etc.
-    """
     import zarr
 
     zarr_path = method_dir / "multitarget_predictions.zarr"
     if not zarr_path.exists():
         return None
 
-    store = zarr.open(str(zarr_path), mode="r")
+    store = zarr.open_group(str(zarr_path), mode="r")
     return {
-        "predictions": np.array(store["predictions"]),    # [n_targets, n_samples, nlat, nlon, nlev]
-        "gt": np.array(store["gt"]),                      # [n_targets, nlat, nlon, nlev]
-        "obs_mask": np.array(store["obs_mask"]),           # [n_targets, nlat, nlon]
-        "obs_values": np.array(store["obs_values"]),       # [n_targets, nlat, nlon]
+        "predictions": np.array(store["predictions"]),
+        "gt": np.array(store["gt"]),
+        "obs_mask": np.array(store["obs_mask"]),
+        "obs_values": np.array(store["obs_values"]),
         "target_time_idx": np.array(store["target_time_idx"]),
         "pressure_weights": np.array(store["pressure_weights"]),
         "ak": np.array(store["ak"]),
     }
 
 
-def build_osse_result(method_name, data):
-    """Build OSSEResult from multi-target zarr data.
+def get_grid_info():
+    """Get lat, lon, and pressure weights from the dataset (canonical source)."""
+    from neural_transport.configs import DataConfig
+    from neural_transport.data.inference_loader import GridInfo, InferenceDataLoader
+    from neural_transport.inference.masking import compute_pressure_weights_from_batch
 
-    Aggregates across targets: concatenates all samples, uses first target's GT
-    for comparison plots, averages mask for display.
-    """
+    dc = DataConfig(
+        dataset="carbontracker", grid="latlon5.625", vertical_levels="l10",
+        freq="6h", target_vars=["co2massmix", "p_bottom", "p_top"], forcing_vars=[],
+    )
+    gi = GridInfo.from_config(dc)
+
+    # Load one sample to get p_bottom/p_top for pressure weight computation
+    import os
+    for base in ["/scratch/vbenson/Carbontracker", "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker"]:
+        if os.path.exists(os.path.join(base, "test")):
+            loader = InferenceDataLoader(dc, data_path=os.path.join(base, "test"))
+            dataset = loader.load_dataset()
+            sample = dataset[0]
+            p_bottom = sample["p_bottom"].numpy()  # [T, N, C] or [N, C]
+            p_top = sample["p_top"].numpy()
+            # Reshape to [nlat, nlon, nlev]
+            if p_bottom.ndim == 3:
+                p_bottom = p_bottom[0]  # take first timestep
+                p_top = p_top[0]
+            p_bottom = p_bottom.reshape(gi.nlat, gi.nlon, -1)
+            p_top = p_top.reshape(gi.nlat, gi.nlon, -1)
+            pw = compute_pressure_weights_from_batch(p_bottom, p_top)
+            return gi.lat, gi.lon, pw
+            break
+
+    # Fallback: no dataset available, return None for pw
+    logger.warning("Could not load dataset for pressure weights")
+    return gi.lat, gi.lon, None
+
+
+def build_osse_result(method_name, data, target_idx=0, lat=None, lon=None, pw=None, ak=None):
+    """Build OSSEResult using canonical pw/ak (from dataset, not zarr)."""
     from neural_transport.inference.metrics import OSSEResult, compute_all_metrics
 
-    preds = data["predictions"]           # [n_targets, n_samples, nlat, nlon, nlev]
-    gt_all = data["gt"]                   # [n_targets, nlat, nlon, nlev]
-    masks = data["obs_mask"]              # [n_targets, nlat, nlon]
-    pw = data["pressure_weights"]         # [n_targets, nlat, nlon, nlev]
-    ak = data["ak"]                       # [n_targets, nlat, nlon, nlev]
+    preds = data["predictions"]
+    gt_all = data["gt"]
+    masks = data["obs_mask"]
 
-    n_targets, n_samples, nlat, nlon, nlev = preds.shape
+    gt = gt_all[target_idx]
+    samples = preds[target_idx]
+    mask = masks[target_idx]
 
-    # For metrics: compute per-target RMSE and average
-    # For samples/gt: use first target for visualization
-    gt_first = gt_all[0]
-    samples_first = preds[0]   # [n_samples, nlat, nlon, nlev]
-    mask_first = masks[0]      # [nlat, nlon]
-    pw_first = pw[0] if pw.any() else None
-    ak_first = ak[0] if ak.any() else None
-
-    # Aggregate all samples across targets for overall metrics
-    all_samples = preds.reshape(n_targets * n_samples, nlat, nlon, nlev)
-
-    # Compute per-target metrics and average
-    per_target_metrics = []
-    per_target_extra = []
-    for t in range(n_targets):
-        try:
-            m, extra = compute_all_metrics(
-                preds[t], gt_all[t],
-                mask_2d=masks[t],
-                pressure_weights=pw[t] if pw.any() else None,
-                ak=ak[t] if ak.any() else None,
-            )
-            per_target_metrics.append(m)
-            per_target_extra.append(extra)
-        except Exception as e:
-            logger.warning("Metrics failed for target %d: %s", t, e)
-
-    # Use first target for the OSSEResult (for visualization)
-    if per_target_metrics:
-        metrics = per_target_metrics[0]
-        extra_first = per_target_extra[0]
-    else:
-        metrics, extra_first = compute_all_metrics(samples_first, gt_first, mask_2d=mask_first)
+    metrics, extra = compute_all_metrics(samples, gt, mask_2d=mask, pressure_weights=pw, ak=ak)
 
     return OSSEResult(
-        name=method_name,
-        config={},
-        metrics=metrics,
-        samples=samples_first,
-        ensemble_mean=samples_first.mean(axis=0),
-        gt=gt_first,
-        mask_2d=mask_first,
-        pressure_weights=pw_first,
-        ak=ak_first,
-        rank_hist=extra_first.get("rank_hist"),
-        calibration_data=extra_first.get("calibration_data"),
-        crps_map=extra_first.get("crps_map"),
-    ), per_target_metrics
+        name=method_name, config={}, metrics=metrics,
+        samples=samples, ensemble_mean=samples.mean(axis=0),
+        gt=gt, mask_2d=mask, pressure_weights=pw, ak=ak,
+        rank_hist=extra.get("rank_hist"),
+        calibration_data=extra.get("calibration_data"),
+        crps_map=extra.get("crps_map"),
+        lat=lat, lon=lon,
+    )
 
 
-# ── Plotting ─────────────────────────────────────────────────────────────
+def build_all_target_metrics(data, pw=None, ak=None):
+    """Compute per-target metrics using canonical pw/ak."""
+    from neural_transport.inference.metrics import compute_all_metrics
+
+    preds = data["predictions"]
+    gt_all = data["gt"]
+    masks = data["obs_mask"]
+
+    per_target_metrics = []
+    for t in range(preds.shape[0]):
+        try:
+            m, _ = compute_all_metrics(
+                preds[t], gt_all[t], mask_2d=masks[t],
+                pressure_weights=pw, ak=ak,
+            )
+            per_target_metrics.append(m)
+        except Exception as e:
+            logger.warning("Metrics failed for target %d: %s", t, e)
+    return per_target_metrics
 
 
-def plot_all(exp_dir=None):
-    """Generate all publication plots."""
-    if exp_dir is None:
-        exp_dir = EXP_DIR
-    exp_dir = Path(exp_dir)
-
-    out_dir = exp_dir / "results" / "plots"
+def plot_all():
+    out_dir = EXP_DIR / "results" / "plots"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── A. Load multi-target data for all methods ──
+    lat, lon, canonical_pw = get_grid_info()
+    # ak=ones is the default for OSSE (no real averaging kernel)
+    canonical_ak = np.ones_like(canonical_pw) if canonical_pw is not None else None
+
+    # Load data
     all_data = {}
-    osse_results = {}
     per_target_data = {}
 
     for method in ALL_METHODS:
-        method_dir = exp_dir / "results" / method
+        method_dir = EXP_DIR / "results" / method
         data = load_multitarget_zarr(method_dir)
         if data is not None:
             all_data[method] = data
-            result, per_target_m = build_osse_result(method, data)
-            osse_results[method] = result
-            per_target_data[method] = per_target_m
-            logger.info("Loaded %s: %d targets × %d samples", method, data["predictions"].shape[0], data["predictions"].shape[1])
+            per_target_data[method] = build_all_target_metrics(data, pw=canonical_pw, ak=canonical_ak)
+            logger.info("Loaded %s: %d targets x %d samples",
+                        method, data["predictions"].shape[0], data["predictions"].shape[1])
 
-    if not osse_results:
-        logger.warning("No multi-target zarr data found. Skipping diagnostic plots.")
-    else:
-        # ── B. Conditioning diagnostics (from toolkit) ──
-        from neural_transport.plots.conditioning_diagnostics import (
-            plot_conditioning_comparison,
-            plot_ensemble_diagnostics,
-            plot_metrics_summary,
-            plot_obs_match_scatter,
-            plot_per_target_panel,
-            plot_spread_at_unobs,
-            plot_xco2_maps,
-            plot_zonal_mean,
+    if not all_data:
+        logger.error("No data found in results/!")
+        return
+
+    methods_found = list(all_data.keys())
+    n_targets = next(iter(all_data.values()))["predictions"].shape[0]
+    logger.info("Methods: %s (%d targets)", methods_found, n_targets)
+
+    # Random target selection for visualization
+    vis_rng = np.random.RandomState(123)
+    random_targets_4 = sorted(vis_rng.choice(n_targets, size=min(4, n_targets), replace=False))
+    random_targets_5 = sorted(vis_rng.choice(n_targets, size=min(5, n_targets), replace=False))
+
+    from neural_transport.plots.conditioning_diagnostics import (
+        plot_conditioning_comparison,
+        plot_detail_metrics_bars,
+        plot_ensemble_diagnostics,
+        plot_metrics_summary,
+        plot_obs_match_scatter,
+        plot_per_target_panel,
+        plot_power_spectra,
+        plot_spread_at_unobs,
+        plot_zonal_mean,
+    )
+
+    # ── Per-GT-sample conditioning comparison (5 targets) ──
+    logger.info("Generating per-target conditioning comparisons (Robinson projection)...")
+    for ti in random_targets_5:
+        osse_for_target = {}
+        for method in methods_found:
+            try:
+                osse_for_target[method] = build_osse_result(method, all_data[method], target_idx=ti, lat=lat, lon=lon, pw=canonical_pw, ak=canonical_ak)
+            except Exception as e:
+                logger.warning("Failed for %s target %d: %s", method, ti, e)
+
+        target_dir = out_dir / f"target_{ti:02d}"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        plot_conditioning_comparison(osse_for_target, target_dir, level_idx=-1, max_samples=3)
+
+    # ── Aggregate diagnostics ──
+    osse_results = {}
+    for method in methods_found:
+        try:
+            osse_results[method] = build_osse_result(method, all_data[method], target_idx=random_targets_5[0], lat=lat, lon=lon, pw=canonical_pw, ak=canonical_ak)
+        except Exception:
+            pass
+
+    logger.info("Generating aggregate diagnostics...")
+    plot_ensemble_diagnostics(osse_results, out_dir)
+    plot_metrics_summary(osse_results, out_dir)
+    plot_obs_match_scatter(osse_results, out_dir, level_idx=-1)
+    plot_spread_at_unobs(osse_results, out_dir, level_idx=-1)
+    plot_zonal_mean(osse_results, out_dir)
+
+    # ── Per-target panels (4 random targets) ──
+    logger.info("Generating per-target panels (random targets %s)...", random_targets_4)
+    # Use canonical pw/ak from dataset (same for all methods)
+    shared_pw, shared_ak = canonical_pw, canonical_ak
+
+    for method in methods_found:
+        data = all_data[method]
+        plot_per_target_panel(
+            {i: data["predictions"][t] for i, t in enumerate(random_targets_4)},
+            {i: data["gt"][t] for i, t in enumerate(random_targets_4)},
+            {i: data["obs_mask"][t] for i, t in enumerate(random_targets_4)},
+            {i: data["obs_values"][t] for i, t in enumerate(random_targets_4)},
+            out_dir, method_name=method,
+            n_targets_show=4, n_samples_show=5, level_idx=-1,
+            lat=lat, lon=lon,
+            pressure_weights=shared_pw, ak=shared_ak,
         )
 
-        logger.info("Generating conditioning comparison plots...")
-        plot_conditioning_comparison(osse_results, out_dir, level_idx=-1, max_samples=3)
-        plot_conditioning_comparison(osse_results, out_dir / "level0", level_idx=0, max_samples=3)
-        plot_ensemble_diagnostics(osse_results, out_dir)
-        plot_metrics_summary(osse_results, out_dir)
-        plot_obs_match_scatter(osse_results, out_dir, level_idx=-1)
-        plot_spread_at_unobs(osse_results, out_dir, level_idx=-1)
+    # ── Fine-scale detail metrics (from library) ──
+    logger.info("Computing fine-scale detail metrics...")
+    from neural_transport.evaluation.spectral import detail_metrics, power_spectrum_2d
+    from neural_transport.inference.metrics import compute_xco2_column
 
-        # XCO2 maps (only if pressure weights available)
-        has_pw = any(r.pressure_weights is not None for r in osse_results.values())
-        if has_pw:
-            plot_xco2_maps(osse_results, out_dir)
+    dm_per_method = {}
+    method_spectra = {}
 
-        plot_zonal_mean(osse_results, out_dir)
+    for method in methods_found:
+        data = all_data[method]
+        per_target_dm = []
+        for t in range(n_targets):
+            try:
+                gt_2d = data["gt"][t].mean(axis=-1)
+                pred_2d = data["predictions"][t].mean(axis=0).mean(axis=-1)
+                per_target_dm.append(detail_metrics(pred_2d, gt_2d))
+            except Exception:
+                pass
+        if per_target_dm:
+            dm_per_method[method] = {
+                k: float(np.mean([d[k] for d in per_target_dm]))
+                for k in per_target_dm[0]
+            }
 
-        # ── C. Per-target sample galleries (for best methods) ──
-        for method in ALL_METHODS:
-            if method not in all_data:
-                continue
-            data = all_data[method]
-            n_targets = data["predictions"].shape[0]
-            samples_dict = {t: data["predictions"][t] for t in range(n_targets)}
-            gt_dict = {t: data["gt"][t] for t in range(n_targets)}
-            mask_dict = {t: data["obs_mask"][t] for t in range(n_targets)}
-            obs_dict = {t: data["obs_values"][t] for t in range(n_targets)}
+        # Power spectrum for first target
+        pred_2d = data["predictions"][0].mean(axis=0).mean(axis=-1)
+        wn, ps = power_spectrum_2d(pred_2d)
+        method_spectra[method] = (wn, ps)
 
-            plot_per_target_panel(
-                samples_dict, gt_dict, mask_dict, obs_dict,
-                out_dir, method_name=method,
-                n_targets_show=4, n_samples_show=5, level_idx=-1,
-            )
+    # GT spectrum
+    gt_2d = next(iter(all_data.values()))["gt"][0].mean(axis=-1)
+    wn_gt, ps_gt = power_spectrum_2d(gt_2d)
+    method_spectra["gt"] = (wn_gt, ps_gt)
 
-        # ── D. Print summary table ──
-        _print_summary(osse_results, per_target_data, exp_dir)
+    if dm_per_method:
+        methods_with_dm = [m for m in methods_found if m in dm_per_method]
+        plot_detail_metrics_bars(dm_per_method, methods_with_dm, out_dir)
+        plot_power_spectra(method_spectra, out_dir)
 
-    # ── E. Optuna analysis ──
-    _plot_optuna(exp_dir, out_dir)
+    # ── Summary table ──
+    print("\n" + "=" * 140)
+    print(f"Posterior Conditioning Comparison  ({len(methods_found)} methods, {n_targets} targets x 20 samples)")
+    print("=" * 140)
 
-    # ── F. Cross-method bars (from method_info.json if available) ──
-    _plot_cross_method_bars(exp_dir, out_dir)
+    header = (f"{'Method':<15} {'RMSE_full':>10} {'RMSE_away':>10} {'RMSE_obs':>10} "
+              f"{'SS_ratio':>10} {'Grad_ratio':>11} {'Spec_div':>10} {'HF_ratio':>10}")
+    print(header)
+    print("-" * len(header))
+
+    for method in methods_found:
+        ptm = per_target_data.get(method, [])
+        dm = dm_per_method.get(method, {})
+        if ptm:
+            row = f"{method:<15}"
+            row += f" {np.mean([m.rmse_3d_full for m in ptm]):>10.4f}"
+            row += f" {np.mean([m.rmse_3d_away for m in ptm]):>10.4f}"
+            rmse_obs_vals = [m.rmse_3d_obs for m in ptm if np.isfinite(m.rmse_3d_obs)]
+            row += f" {np.mean(rmse_obs_vals):>10.4f}" if rmse_obs_vals else f" {'N/A':>10}"
+            ss_vals = [m.spread_skill for m in ptm if np.isfinite(m.spread_skill)]
+            row += f" {np.mean(ss_vals):>10.4f}" if ss_vals else f" {'N/A':>10}"
+            row += f" {dm.get('grad_ratio', float('nan')):>11.4f}"
+            row += f" {dm.get('spectral_div', float('nan')):>10.4f}"
+            row += f" {dm.get('high_freq_power_ratio', float('nan')):>10.4f}"
+            print(row)
+
+    print("=" * 140 + "\n")
+
+    # Save summary JSON
+    summary = {}
+    for method in methods_found:
+        ptm = per_target_data.get(method, [])
+        dm = dm_per_method.get(method, {})
+        if ptm:
+            summary[method] = {
+                "mean_rmse_full": float(np.mean([m.rmse_3d_full for m in ptm])),
+                "mean_rmse_away": float(np.mean([m.rmse_3d_away for m in ptm])),
+                "mean_rmse_obs": float(np.nanmean([m.rmse_3d_obs for m in ptm])),
+                "mean_spread_skill": float(np.nanmean([m.spread_skill for m in ptm])),
+                "mean_spread": float(np.mean([m.sample_spread for m in ptm])),
+                **{f"detail_{k}": v for k, v in dm.items()},
+            }
+    with open(out_dir / "summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
 
     logger.info("All plots saved to %s", out_dir)
 
 
-def _print_summary(osse_results, per_target_data, exp_dir):
-    """Print summary table with per-method metrics."""
-    print("\n" + "=" * 90)
-    print("GRAND SUMMARY — Multi-Target Posterior Conditioning Comparison")
-    print("=" * 90)
-
-    header = f"{'Method':<15} {'RMSE_3D':>10} {'RMSE_obs':>10} {'RMSE_away':>10} {'R2':>8} {'SS_ratio':>10} {'Spread':>10}"
-    print(header)
-    print("-" * len(header))
-
-    for method in ALL_METHODS:
-        if method not in osse_results:
-            continue
-        res = osse_results[method]
-        m = res.metrics
-        row = f"{method:<15}"
-        row += f" {m.rmse_3d_full:>10.4f}"
-        row += f" {m.rmse_3d_obs:>10.4f}"
-        row += f" {m.rmse_3d_away:>10.4f}"
-        row += f" {m.r2:>8.4f}"
-        row += f" {m.spread_skill:>10.4f}"
-        row += f" {m.sample_spread:>10.4f}"
-        print(row)
-
-    # Success gate
-    uncond = osse_results.get("unconditional")
-    if uncond is not None:
-        best_method = None
-        best_rmse = float("inf")
-        for method in METHODS:
-            if method in osse_results:
-                rmse = osse_results[method].metrics.rmse_3d_full
-                if rmse < best_rmse:
-                    best_rmse = rmse
-                    best_method = method
-
-        print(f"\nUnconditional RMSE: {uncond.metrics.rmse_3d_full:.4f}")
-        if best_method:
-            improvement = 1 - best_rmse / uncond.metrics.rmse_3d_full
-            print(f"Best method: {best_method} (RMSE={best_rmse:.4f}, {improvement*100:.1f}% improvement)")
-    print("=" * 90 + "\n")
-
-
-def _plot_optuna(exp_dir, out_dir):
-    """Run Optuna analysis for each method."""
-    try:
-        from neural_transport.training.study_analysis import analyze_study
-    except ImportError:
-        return
-
-    for method in METHODS:
-        db_path = exp_dir / "optuna_runs" / f"{method}_study.db"
-        if not db_path.exists():
-            continue
-        try:
-            analyze_study(
-                f"sqlite:///{db_path}",
-                study_name=f"posterior_{method}",
-                out_dir=out_dir / f"optuna_{method}",
-                run_dir=exp_dir / "optuna_runs" / method,
-            )
-        except Exception as e:
-            logger.warning("Optuna analysis failed for %s: %s", method, e)
-
-
-def _plot_cross_method_bars(exp_dir, out_dir):
-    """Summary bars from method_info.json files."""
-    from neural_transport.plots.metrics_plots import plot_pareto_front, plot_summary_bars
-
-    results_dir = exp_dir / "results"
-    metrics = {}
-    for method in ALL_METHODS:
-        info_path = results_dir / method / "method_info.json"
-        if info_path.exists():
-            info = json.loads(info_path.read_text())
-            metrics[method] = {"wall_time_sec": info.get("wall_time_sec", 0)}
-
-    if metrics and any("wall_time_sec" in m for m in metrics.values()):
-        # Need RMSE from osse_results — load if available
-        for method in ALL_METHODS:
-            data = load_multitarget_zarr(results_dir / method)
-            if data is not None and method in metrics:
-                from neural_transport.inference.metrics import compute_all_metrics
-                preds = data["predictions"]
-                gt = data["gt"]
-                # Use first target for quick RMSE
-                m, _ = compute_all_metrics(preds[0], gt[0])
-                metrics[method]["RMSE_3D"] = m.rmse_3d_full
-                metrics[method]["R2"] = m.r2
-
-        if any("RMSE_3D" in m for m in metrics.values()):
-            plot_summary_bars(metrics, "RMSE_3D", out_dir, title="3D RMSE by Method")
-            plot_summary_bars(metrics, "R2", out_dir, title="R² by Method", lower_is_better=False)
-            plot_pareto_front(metrics, "wall_time_sec", "RMSE_3D", out_dir, title="Cost vs Accuracy")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Plot multi-target comparison results")
-    parser.add_argument("--exp-dir", type=str, default=None)
-    args = parser.parse_args()
-    exp_dir = Path(args.exp_dir) if args.exp_dir else EXP_DIR
-    plot_all(exp_dir)
-
-
 if __name__ == "__main__":
-    main()
+    plot_all()
