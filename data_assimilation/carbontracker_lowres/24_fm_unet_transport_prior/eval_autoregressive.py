@@ -1,25 +1,27 @@
-"""Auto-regressive evaluation of the Phase 24 FM transport-prior model.
+"""Ensemble trajectory evaluation for the Phase 24 FM transport-prior model.
 
-Rolls out the model over the test period by feeding predicted CO2 back as
-conditioning at each timestep; wind fields come from CarbonTracker (GT external
-forcing). Optionally re-initialises from GT every N steps (sliding-window mode).
+For each random init point, draws N independent samples and rolls each one out
+as an auto-regressive (or sliding-window) trajectory. Winds come from GT at
+every step; CO2 is fed back from each sample's own prediction.
 
 Usage:
     python eval_autoregressive.py
-    python eval_autoregressive.py --reinit-every 120   # ~1 month at 6h freq
-    python eval_autoregressive.py --n-steps 200 --init-idx 0
+    python eval_autoregressive.py --reinit-every 120
+    python eval_autoregressive.py --n-init-points 5 --n-samples 5 --n-steps 40
 """
 
 import argparse
 import logging
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import xarray as xr
 
 from neural_transport.configs import DataConfig
 from neural_transport.data.inference_loader import InferenceDataLoader
-from neural_transport.inference.analyse import compute_score_df
-from neural_transport.inference.generation import generate_autoregressive
+from neural_transport.inference.analyse import compute_trajectory_ensemble_metrics
+from neural_transport.inference.generation import generate_ensemble
 from neural_transport.training.train import load_model
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
@@ -30,18 +32,28 @@ DEFAULT_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracke
 
 TARGET_VARS = ["co2massmix"]
 FORCING_VARS = ["co2massmix", "u", "v"]
+# 6h freq → 4 steps/day → 365*4 = 1460 steps per year.
+STEPS_PER_YEAR = 365 * 4
+
+
+def parse_n_steps(val, max_steps):
+    if val is None or val == "full":
+        return max_steps
+    return min(int(val), max_steps)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Phase 24 auto-regressive eval")
+    parser = argparse.ArgumentParser(description="Phase 24 ensemble trajectory eval")
     parser.add_argument("--data-root", type=str, default=DEFAULT_DATA_ROOT)
     parser.add_argument("--split", type=str, default="test")
     parser.add_argument("--ckpt", type=str, default="best")
-    parser.add_argument("--n-steps", type=int, default=None,
-                        help="Number of autoregressive steps (default: full split)")
-    parser.add_argument("--init-idx", type=int, default=0)
+    parser.add_argument("--n-init-points", type=int, default=10)
+    parser.add_argument("--n-samples", type=int, default=10)
+    parser.add_argument("--n-steps", type=str, default="full",
+                        help="Trajectory length per init. 'full' = 1 year. Capped at 1 year.")
     parser.add_argument("--reinit-every", type=int, default=None,
-                        help="Sliding-window re-init frequency (in steps). Default: none → pure AR")
+                        help="Sliding-window re-init frequency in steps.")
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda")
     args = parser.parse_args()
 
@@ -50,42 +62,81 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     model = load_model(EXP_DIR, ckpt=args.ckpt, device=args.device)
-    logger.info("Loaded model from %s (ckpt=%s)", EXP_DIR, args.ckpt)
+    logger.info("Loaded model (ckpt=%s)", args.ckpt)
 
-    data_cfg = DataConfig(
-        target_vars=TARGET_VARS,
-        forcing_vars=FORCING_VARS,
-    )
+    data_cfg = DataConfig(target_vars=TARGET_VARS, forcing_vars=FORCING_VARS)
     loader = InferenceDataLoader(data_cfg, Path(args.data_root) / args.split)
-    n_steps = args.n_steps if args.n_steps is not None else len(loader) - args.init_idx - 1
-    logger.info("Rolling out %d steps from init_idx=%d (reinit_every=%s)",
-                n_steps, args.init_idx, args.reinit_every)
 
-    preds = generate_autoregressive(
+    # Cap trajectory to 1 year; exclude last year (= n_steps) from init sampling
+    # so every trajectory fits inside the split.
+    n_steps = parse_n_steps(args.n_steps, STEPS_PER_YEAR)
+    valid_init_range = len(loader) - n_steps - 1
+    if valid_init_range <= 0:
+        raise RuntimeError(
+            f"Test split too short for n_steps={n_steps} (len={len(loader)})."
+        )
+
+    rng = np.random.RandomState(args.seed)
+    n_inits = min(args.n_init_points, valid_init_range)
+    init_indices = sorted(rng.choice(valid_init_range, n_inits, replace=False).tolist())
+    logger.info(
+        "Rolling out %d inits × %d samples × %d steps (reinit_every=%s)",
+        n_inits, args.n_samples, n_steps, args.reinit_every,
+    )
+
+    preds = generate_ensemble(
         model,
         loader,
+        init_indices=init_indices,
+        n_samples=args.n_samples,
         n_steps=n_steps,
-        target_var=TARGET_VARS[0],
-        init_idx=args.init_idx,
         reinit_every=args.reinit_every,
+        target_var=TARGET_VARS[0],
         device=args.device,
+        seed=args.seed,
         verbose=True,
     )
-    preds_path = out_dir / "preds.zarr"
+    preds_path = out_dir / "preds_ensemble.zarr"
     preds.to_zarr(preds_path, mode="w")
-    logger.info("Saved predictions → %s", preds_path)
+    logger.info("Saved ensemble predictions → %s", preds_path)
 
-    # Ground truth over the same time window. compute_score_df needs airmass
-    # from the GT side (predictions only carry co2massmix).
-    gt_path = Path(args.data_root) / args.split / "carbontracker_latlon5.625_l10_6h.zarr"
-    gt = xr.open_zarr(gt_path)[TARGET_VARS + ["airmass"]].sel(time=preds.time)
+    # Build GT aligned to (init, lead): fetch through the dataset so we reuse
+    # the same normalization-free raw fields the model sees as co2massmix_next.
+    target = TARGET_VARS[0]
+    nlat, nlon = loader.grid_info.nlat, loader.grid_info.nlon
+    nlev = preds.sizes["level"]
+    gt_stack = np.full((len(init_indices), n_steps, nlat, nlon, nlev), np.nan, dtype=np.float32)
+    for i, init_idx in enumerate(init_indices):
+        for k in range(n_steps):
+            sample = loader.dataset[init_idx + k]
+            next_key = f"{target}_next"
+            field = sample[next_key] if next_key in sample else loader.dataset[init_idx + k + 1][target]
+            if hasattr(field, "numpy"):
+                field = field.numpy()
+            if field.ndim == 3:
+                field = field[0]
+            gt_stack[i, k] = field.reshape(nlat, nlon, nlev)
 
-    # Score: dataset-level metrics as a pandas Series (RMSE / R² / mass error).
+    gt_ds = xr.Dataset(
+        {TARGET_VARS[0]: (("init", "lead", "lat", "lon", "level"), gt_stack)},
+        coords={
+            "init": preds["init"].values,
+            "lead": preds["lead"].values,
+            "lat": preds["lat"].values,
+            "lon": preds["lon"].values,
+            "level": preds["level"].values,
+        },
+    )
+
+    per_lead, summary, rank_hist = compute_trajectory_ensemble_metrics(
+        gt_ds, preds, target_var=TARGET_VARS[0]
+    )
     score_dir = out_dir / "scores"
     score_dir.mkdir(exist_ok=True)
-    metrics = compute_score_df(gt, preds)
-    metrics.to_csv(score_dir / "metrics.csv")
-    logger.info("Scores → %s", score_dir / "metrics.csv")
+    per_lead.to_csv(score_dir / "metrics_per_lead.csv")
+    summary.to_csv(score_dir / "metrics_summary.csv", header=["value"])
+    pd.DataFrame(rank_hist).to_csv(score_dir / "rank_histogram.csv", index_label="lead")
+    logger.info("Metrics → %s", score_dir)
 
 
 if __name__ == "__main__":

@@ -15,8 +15,10 @@ export PYTHONFAULTHANDLER=1
 
 OUT_DIR=/Net/Groups/BGI/people/vbenson/CarbonBench/dryrun/carbonbench/data_assimilation/carbontracker_lowres/24_fm_unet_transport_prior
 
-# Auto-regressive (pure rollout)
-srun python3 -u "${OUT_DIR}/eval_autoregressive.py"
+# Ensemble auto-regressive: 10 inits × 10 samples × up-to-1yr trajectories
+srun python3 -u "${OUT_DIR}/eval_autoregressive.py" \
+    --n-init-points 10 --n-samples 10 --n-steps full
 
 # Sliding-window (re-init every 120 steps ≈ 30 days at 6h freq)
-srun python3 -u "${OUT_DIR}/eval_autoregressive.py" --reinit-every 120
+srun python3 -u "${OUT_DIR}/eval_autoregressive.py" \
+    --n-init-points 10 --n-samples 10 --n-steps full --reinit-every 120
