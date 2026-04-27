@@ -1,0 +1,216 @@
+"""Phase 25b: batched per-trajectory auto-regressive DA.
+
+Identical purpose to ``eval_trajectory.py`` but uses
+``generate_trajectory_ensemble_batched`` so that all `n_inits × n_samples`
+trajectories are propagated in a single batch per step. This is much faster
+on multi-GB-VRAM GPUs and lets us bump `n_inits` to 20 and `n_samples` to 10
+within the same wallclock as the old 4×4 setup.
+
+Usage:
+    python eval_trajectory_v2.py --method fmps --n-inits 20 --n-samples 10 \
+        --n-steps 120 --obs-every 4 --tag 1month_v2
+
+    python eval_trajectory_v2.py --method none --n-inits 20 --n-samples 10 \
+        --n-steps 120 --tag 1month_v2
+
+    python eval_trajectory_v2.py --method dflow --n-inits 20 --n-samples 10 \
+        --n-steps 120 --obs-every 4 --n-opt-steps 30 --tag 1month_v2
+"""
+
+import argparse
+import json
+import logging
+import time
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import xarray as xr
+
+from neural_transport.configs import DataConfig
+from neural_transport.data.inference_loader import InferenceDataLoader
+from neural_transport.inference.analyse import compute_trajectory_ensemble_metrics
+from neural_transport.inference.generation import generate_trajectory_ensemble_batched
+from neural_transport.training.train import load_model
+
+from configs import (  # noqa: E402
+    adapt_for_trajectory,
+    free_kwargs_from_obs_kwargs,
+    load_method_config,
+)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
+
+EXP_DIR = Path(__file__).resolve().parent
+PHASE24_DIR = EXP_DIR.parent / "24_fm_unet_transport_prior"
+PHASE25G_DIR = (
+    EXP_DIR.parent / "25c_v4_residual_fm" / "phase2_residual_fm"
+)
+DEFAULT_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker"
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--method", choices=["fmps", "dflow", "none"], default="fmps")
+    p.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
+    p.add_argument("--split", default="test")
+    p.add_argument("--n-inits", type=int, default=20)
+    p.add_argument("--n-samples", type=int, default=10)
+    p.add_argument("--n-steps", type=int, default=120)
+    p.add_argument("--obs-every", type=int, default=4)
+    p.add_argument("--obs-offset", type=int, default=0)
+    p.add_argument("--reinit-every", type=int, default=None)
+    p.add_argument("--n-opt-steps", type=int, default=None)
+    p.add_argument("--chunk-size", type=int, default=None,
+                   help="If set, run forward in chunks of this many trajectories.")
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--device", default="cuda")
+    p.add_argument("--ckpt", default="best")
+    p.add_argument("--tag", default="1month_v2")
+    p.add_argument("--noise-scale", type=float, default=1.0,
+                   help="AWG-style initial-noise scaling rho. >1 widens the source "
+                        "distribution to counter AR underdispersion (Phase 25e).")
+    p.add_argument("--phase", choices=["24", "25g"], default="24",
+                   help="Which model to load: 24 = Phase 24 FM, 25g = ResidualFlowMatching (Phase 25g).")
+    args = p.parse_args()
+
+    model_dir = PHASE25G_DIR if args.phase == "25g" else PHASE24_DIR
+    model = load_model(model_dir, ckpt=args.ckpt, device=args.device)
+    logger.info("Loaded model from %s (phase=%s)", model_dir, args.phase)
+
+    data_cfg = DataConfig(
+        dataset="carbontracker",
+        grid="latlon5.625",
+        vertical_levels="l10",
+        freq="6h",
+        target_vars=["co2massmix", "p_bottom", "p_top"],
+        forcing_vars=["co2massmix", "u", "v"],
+    )
+    loader = InferenceDataLoader(data_cfg, data_path=f"{args.data_root}/{args.split}")
+    loader.load_dataset()
+
+    valid_init_range = len(loader) - args.n_steps - 1
+    if valid_init_range <= 0:
+        raise RuntimeError(f"Split too short for n_steps={args.n_steps}")
+    rng = np.random.RandomState(args.seed)
+    init_indices = sorted(rng.choice(valid_init_range, min(args.n_inits, valid_init_range),
+                                     replace=False).tolist())
+    logger.info("inits=%s n_samples=%d n_steps=%d obs_every=%d method=%s chunk=%s",
+                init_indices, args.n_samples, args.n_steps, args.obs_every,
+                args.method, args.chunk_size)
+
+    out_dir = EXP_DIR / "results" / f"{args.method}_{args.tag}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.method == "none":
+        sampler_kwargs = None
+        free_kwargs = {"noise_scale": args.noise_scale} if args.noise_scale != 1.0 else None
+    else:
+        cfg = load_method_config(args.method, n_samples=args.n_samples)
+        sampler_kwargs = adapt_for_trajectory(
+            cfg, n_samples=args.n_samples, method=args.method,
+            n_opt_steps=args.n_opt_steps,
+        )
+        if args.noise_scale != 1.0:
+            sampler_kwargs["noise_scale"] = args.noise_scale
+        free_kwargs = free_kwargs_from_obs_kwargs(sampler_kwargs)
+
+    t0 = time.perf_counter()
+    ds = generate_trajectory_ensemble_batched(
+        model, loader,
+        init_indices=init_indices,
+        n_samples=args.n_samples,
+        n_steps=args.n_steps,
+        sampler_generate_kwargs=sampler_kwargs,
+        free_generate_kwargs=free_kwargs,
+        obs_every=args.obs_every,
+        obs_offset=args.obs_offset,
+        reinit_every=args.reinit_every,
+        device=args.device,
+        seed=args.seed,
+        chunk_size=args.chunk_size,
+        verbose=True,
+    )
+    wall = time.perf_counter() - t0
+    logger.info("Trajectory rollout done in %.1fs", wall)
+
+    preds_path = out_dir / "preds_trajectory.zarr"
+    if preds_path.exists():
+        import shutil; shutil.rmtree(preds_path)
+    ds.to_zarr(preds_path, mode="w")
+    logger.info("Saved → %s", preds_path)
+
+    # Build GT.
+    target = "co2massmix"
+    nlat, nlon = loader.grid_info.nlat, loader.grid_info.nlon
+    nlev = ds.sizes["level"]
+    gt_stack = np.full((len(init_indices), args.n_steps, nlat, nlon, nlev),
+                       np.nan, dtype=np.float32)
+    ds_inner = loader.dataset
+    fast_arr = getattr(ds_inner, "_fast_var_data", {}).get(target)
+    if fast_arr is not None:
+        init_offset = ds_inner.initial_time_idx
+        for i, init_idx in enumerate(init_indices):
+            start = init_offset + init_idx + 1
+            end = min(start + args.n_steps, fast_arr.shape[0])
+            L = end - start
+            gt_stack[i, :L] = fast_arr[start:end].reshape(L, nlat, nlon, nlev)
+    else:
+        for i, init_idx in enumerate(init_indices):
+            for k in range(args.n_steps):
+                sample = ds_inner[init_idx + k]
+                next_key = f"{target}_next"
+                field = sample[next_key] if next_key in sample else ds_inner[init_idx + k + 1][target]
+                if hasattr(field, "numpy"):
+                    field = field.numpy()
+                if field.ndim == 3:
+                    field = field[0]
+                gt_stack[i, k] = field.reshape(nlat, nlon, nlev)
+
+    gt_ds = xr.Dataset(
+        {target: (("init", "lead", "lat", "lon", "level"), gt_stack)},
+        coords={
+            "init": ds["init"].values,
+            "lead": ds["lead"].values,
+            "lat": ds["lat"].values,
+            "lon": ds["lon"].values,
+            "level": ds["level"].values,
+        },
+    )
+    gt_path = out_dir / "gt_trajectory.zarr"
+    if gt_path.exists():
+        import shutil; shutil.rmtree(gt_path)
+    gt_ds.to_zarr(gt_path, mode="w")
+
+    per_lead, summary, rank_hist = compute_trajectory_ensemble_metrics(gt_ds, ds, target_var=target)
+    score_dir = out_dir / "scores"
+    score_dir.mkdir(exist_ok=True)
+    per_lead.to_csv(score_dir / "metrics_per_lead.csv")
+    summary.to_csv(score_dir / "metrics_summary.csv", header=["value"])
+    pd.DataFrame(rank_hist).to_csv(score_dir / "rank_histogram.csv", index_label="lead")
+
+    info = {
+        "eval": f"trajectory_v2_{args.tag}",
+        "phase": args.phase,
+        "method": args.method,
+        "wall_time_sec": wall,
+        "n_inits": len(init_indices),
+        "n_samples_per_init": args.n_samples,
+        "n_steps": args.n_steps,
+        "obs_every": args.obs_every,
+        "obs_offset": args.obs_offset,
+        "init_indices": init_indices,
+        "ckpt": args.ckpt,
+        "chunk_size": args.chunk_size,
+        "n_opt_steps": args.n_opt_steps,
+    }
+    with open(out_dir / "method_info.json", "w") as f:
+        json.dump(info, f, indent=2, default=str)
+    logger.info("Metrics → %s | summary RMSE=%.3f CRPS=%.3f spread/err=%.2f",
+                score_dir, float(summary["rmse_mean"]), float(summary["crps"]),
+                float(summary["spread_error_ratio"]))
+
+
+if __name__ == "__main__":
+    main()
