@@ -32,6 +32,7 @@ from neural_transport.data.inference_loader import InferenceDataLoader
 from neural_transport.inference.analyse import compute_trajectory_ensemble_metrics
 from neural_transport.inference.generation import (
     generate_trajectory_enkf,
+    generate_trajectory_enks,
     generate_trajectory_ensemble_batched,
     generate_trajectory_window_dflow,
 )
@@ -51,12 +52,15 @@ PHASE24_DIR = EXP_DIR.parent / "24_fm_unet_transport_prior"
 PHASE25G_DIR = (
     EXP_DIR.parent / "25c_v4_residual_fm" / "phase2_residual_fm"
 )
+PHASE25G_ROLLOUT_FT_DIR = (
+    EXP_DIR.parent / "25c_v4_residual_fm" / "phase2b_residual_fm_rollout_ft"
+)
 DEFAULT_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker"
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--method", choices=["fmps", "dflow", "none", "window_dflow", "enkf"], default="fmps")
+    p.add_argument("--method", choices=["fmps", "dflow", "none", "window_dflow", "enkf", "enks"], default="fmps")
     p.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
     p.add_argument("--split", default="test")
     p.add_argument("--n-inits", type=int, default=20)
@@ -75,8 +79,8 @@ def main():
     p.add_argument("--noise-scale", type=float, default=1.0,
                    help="AWG-style initial-noise scaling rho. >1 widens the source "
                         "distribution to counter AR underdispersion (Phase 25e).")
-    p.add_argument("--phase", choices=["24", "25g"], default="24",
-                   help="Which model to load: 24 = Phase 24 FM, 25g = ResidualFlowMatching (Phase 25g).")
+    p.add_argument("--phase", choices=["24", "25g", "25g_rollout_ft"], default="24",
+                   help="Which model to load: 24 = Phase 24 FM, 25g = ResidualFlowMatching (Phase 25g), 25g_rollout_ft = Phase 2b rollout-FT residual-FM.")
     p.add_argument("--obs-fraction", type=float, default=None,
                    help="Override the satellite-mask obs_fraction (default 0.3 from configs.py).")
     # Phase 25i: per-knob FMPS overrides (post-Optuna sweep).
@@ -106,9 +110,21 @@ def main():
                    help="Multiplicative prior-inflation factor (Anderson 2007), applied BEFORE the EnKF update.")
     p.add_argument("--enkf-hybrid", action="store_true",
                    help="EnKF + FMPS hybrid: use FMPS sampler at obs steps (instead of free) then apply EnKF on top.")
+    p.add_argument("--enkf-global-bias-correct", action="store_true",
+                   help="After per-cell EnKF, snap global mean XCO2 to observed mean. Counters residual-FM drift.")
+    # enks specific
+    p.add_argument("--enks-lag", type=int, default=24,
+                   help="Fixed-lag EnKS smoother window (in AR steps). Default 24 (1 day at 6h freq).")
+    p.add_argument("--enks-damping", type=float, default=1.0,
+                   help="Scale factor for past-state Kalman gain (0=no smoothing, 1=full). Mitigates spurious cross-cov from small ensemble.")
     args = p.parse_args()
 
-    model_dir = PHASE25G_DIR if args.phase == "25g" else PHASE24_DIR
+    if args.phase == "25g_rollout_ft":
+        model_dir = PHASE25G_ROLLOUT_FT_DIR
+    elif args.phase == "25g":
+        model_dir = PHASE25G_DIR
+    else:
+        model_dir = PHASE24_DIR
     model = load_model(model_dir, ckpt=args.ckpt, device=args.device)
     logger.info("Loaded model from %s (phase=%s)", model_dir, args.phase)
 
@@ -139,7 +155,7 @@ def main():
     if args.method == "none":
         sampler_kwargs = None
         free_kwargs = {"noise_scale": args.noise_scale} if args.noise_scale != 1.0 else None
-    elif args.method == "enkf":
+    elif args.method in ("enkf", "enks"):
         # Reuse FMPS config to inherit mask_pattern/obs_fraction/ak_10/etc.
         cfg = load_method_config("fmps", n_samples=args.n_samples)
         sampler_kwargs = adapt_for_trajectory(
@@ -199,6 +215,28 @@ def main():
             inflation=args.enkf_inflation,
             prior_inflation=args.enkf_prior_inflation,
             loc_sigma=args.enkf_loc_sigma,
+            global_bias_correct=args.enkf_global_bias_correct,
+            device=args.device,
+            seed=args.seed,
+            chunk_size=args.chunk_size,
+            verbose=True,
+        )
+    elif args.method == "enks":
+        ds = generate_trajectory_enks(
+            model, loader,
+            init_indices=init_indices,
+            n_samples=args.n_samples,
+            n_steps=args.n_steps,
+            obs_kwargs=sampler_kwargs,
+            free_kwargs=free_kwargs,
+            obs_every=args.obs_every,
+            obs_offset=args.obs_offset,
+            sigma_obs=args.sigma_obs,
+            inflation=args.enkf_inflation,
+            prior_inflation=args.enkf_prior_inflation,
+            loc_sigma=args.enkf_loc_sigma,
+            lag=args.enks_lag,
+            damping=args.enks_damping,
             device=args.device,
             seed=args.seed,
             chunk_size=args.chunk_size,
