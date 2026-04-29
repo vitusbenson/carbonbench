@@ -30,7 +30,11 @@ import xarray as xr
 from neural_transport.configs import DataConfig
 from neural_transport.data.inference_loader import InferenceDataLoader
 from neural_transport.inference.analyse import compute_trajectory_ensemble_metrics
-from neural_transport.inference.generation import generate_trajectory_ensemble_batched
+from neural_transport.inference.generation import (
+    generate_trajectory_enkf,
+    generate_trajectory_ensemble_batched,
+    generate_trajectory_window_dflow,
+)
 from neural_transport.training.train import load_model
 
 from configs import (  # noqa: E402
@@ -52,7 +56,7 @@ DEFAULT_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracke
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--method", choices=["fmps", "dflow", "none"], default="fmps")
+    p.add_argument("--method", choices=["fmps", "dflow", "none", "window_dflow", "enkf"], default="fmps")
     p.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
     p.add_argument("--split", default="test")
     p.add_argument("--n-inits", type=int, default=20)
@@ -73,6 +77,35 @@ def main():
                         "distribution to counter AR underdispersion (Phase 25e).")
     p.add_argument("--phase", choices=["24", "25g"], default="24",
                    help="Which model to load: 24 = Phase 24 FM, 25g = ResidualFlowMatching (Phase 25g).")
+    p.add_argument("--obs-fraction", type=float, default=None,
+                   help="Override the satellite-mask obs_fraction (default 0.3 from configs.py).")
+    # Phase 25i: per-knob FMPS overrides (post-Optuna sweep).
+    p.add_argument("--ode-steps", type=int, default=None,
+                   help="Override FM ODE solver steps (default 21).")
+    p.add_argument("--guidance-strength", type=float, default=None,
+                   help="Override FMPS guidance_strength (default tuned ~46).")
+    p.add_argument("--spatial-smoothing", type=float, default=None,
+                   help="Override FMPS spatial_smoothing_sigma (default tuned ~4.0).")
+    p.add_argument("--grad-clip-norm", type=float, default=None,
+                   help="Override FMPS grad_clip_norm (default tuned ~9.9).")
+    # window_dflow specific
+    p.add_argument("--window-size", type=int, default=4)
+    p.add_argument("--window-stride", type=int, default=None,
+                   help="Default = window_size (non-overlapping).")
+    p.add_argument("--lr", type=float, default=1e-2)
+    p.add_argument("--sigma-obs", type=float, default=0.1)
+    p.add_argument("--reg-weight", type=float, default=0.0)
+    p.add_argument("--no-checkpointing", action="store_true",
+                   help="Disable per-AR-step gradient checkpointing (uses more memory).")
+    # enkf specific
+    p.add_argument("--enkf-inflation", type=float, default=1.0,
+                   help="Multiplicative ensemble inflation post-EnKF update.")
+    p.add_argument("--enkf-loc-sigma", type=float, default=0.0,
+                   help="Horizontal Gaussian localization sigma in grid cells (0 = vertical-only EnKF).")
+    p.add_argument("--enkf-prior-inflation", type=float, default=1.0,
+                   help="Multiplicative prior-inflation factor (Anderson 2007), applied BEFORE the EnKF update.")
+    p.add_argument("--enkf-hybrid", action="store_true",
+                   help="EnKF + FMPS hybrid: use FMPS sampler at obs steps (instead of free) then apply EnKF on top.")
     args = p.parse_args()
 
     model_dir = PHASE25G_DIR if args.phase == "25g" else PHASE24_DIR
@@ -106,6 +139,29 @@ def main():
     if args.method == "none":
         sampler_kwargs = None
         free_kwargs = {"noise_scale": args.noise_scale} if args.noise_scale != 1.0 else None
+    elif args.method == "enkf":
+        # Reuse FMPS config to inherit mask_pattern/obs_fraction/ak_10/etc.
+        cfg = load_method_config("fmps", n_samples=args.n_samples)
+        sampler_kwargs = adapt_for_trajectory(
+            cfg, n_samples=args.n_samples, method="fmps", n_opt_steps=None,
+        )
+        if args.noise_scale != 1.0:
+            sampler_kwargs["noise_scale"] = args.noise_scale
+        if args.obs_fraction is not None:
+            sampler_kwargs["obs_fraction"] = args.obs_fraction
+        free_kwargs = free_kwargs_from_obs_kwargs(sampler_kwargs)
+    elif args.method == "window_dflow":
+        # Reuse the FMPS config to inherit mask_pattern / obs_fraction / etc.,
+        # but window-D-Flow uses its own loss machinery (no inner sampler).
+        cfg = load_method_config("fmps", n_samples=args.n_samples)
+        sampler_kwargs = adapt_for_trajectory(
+            cfg, n_samples=args.n_samples, method="fmps", n_opt_steps=None,
+        )
+        if args.noise_scale != 1.0:
+            sampler_kwargs["noise_scale"] = args.noise_scale
+        if args.obs_fraction is not None:
+            sampler_kwargs["obs_fraction"] = args.obs_fraction
+        free_kwargs = free_kwargs_from_obs_kwargs(sampler_kwargs)
     else:
         cfg = load_method_config(args.method, n_samples=args.n_samples)
         sampler_kwargs = adapt_for_trajectory(
@@ -114,24 +170,78 @@ def main():
         )
         if args.noise_scale != 1.0:
             sampler_kwargs["noise_scale"] = args.noise_scale
+        if args.obs_fraction is not None:
+            sampler_kwargs["obs_fraction"] = args.obs_fraction
+        # Phase 25i FMPS knob overrides
+        if args.ode_steps is not None:
+            sampler_kwargs["steps"] = args.ode_steps
+        if args.guidance_strength is not None:
+            sampler_kwargs["guidance_strength"] = args.guidance_strength
+        if args.spatial_smoothing is not None:
+            sampler_kwargs["spatial_smoothing_sigma"] = args.spatial_smoothing
+        if args.grad_clip_norm is not None:
+            sampler_kwargs["grad_clip_norm"] = args.grad_clip_norm
         free_kwargs = free_kwargs_from_obs_kwargs(sampler_kwargs)
 
     t0 = time.perf_counter()
-    ds = generate_trajectory_ensemble_batched(
-        model, loader,
-        init_indices=init_indices,
-        n_samples=args.n_samples,
-        n_steps=args.n_steps,
-        sampler_generate_kwargs=sampler_kwargs,
-        free_generate_kwargs=free_kwargs,
-        obs_every=args.obs_every,
-        obs_offset=args.obs_offset,
-        reinit_every=args.reinit_every,
-        device=args.device,
-        seed=args.seed,
-        chunk_size=args.chunk_size,
-        verbose=True,
-    )
+    if args.method == "enkf":
+        ds = generate_trajectory_enkf(
+            model, loader,
+            init_indices=init_indices,
+            n_samples=args.n_samples,
+            n_steps=args.n_steps,
+            obs_kwargs=sampler_kwargs,
+            free_kwargs=free_kwargs,
+            sampler_kwargs=(sampler_kwargs if args.enkf_hybrid else None),
+            obs_every=args.obs_every,
+            obs_offset=args.obs_offset,
+            sigma_obs=args.sigma_obs,
+            inflation=args.enkf_inflation,
+            prior_inflation=args.enkf_prior_inflation,
+            loc_sigma=args.enkf_loc_sigma,
+            device=args.device,
+            seed=args.seed,
+            chunk_size=args.chunk_size,
+            verbose=True,
+        )
+    elif args.method == "window_dflow":
+        ds = generate_trajectory_window_dflow(
+            model, loader,
+            init_indices=init_indices,
+            n_samples=args.n_samples,
+            n_steps=args.n_steps,
+            obs_kwargs=sampler_kwargs,
+            free_kwargs=free_kwargs,
+            obs_every=args.obs_every,
+            obs_offset=args.obs_offset,
+            window_size=args.window_size,
+            window_stride=args.window_stride,
+            n_opt_steps=args.n_opt_steps if args.n_opt_steps is not None else 20,
+            lr=args.lr,
+            sigma_obs=args.sigma_obs,
+            reg_weight=args.reg_weight,
+            device=args.device,
+            seed=args.seed,
+            chunk_size=args.chunk_size,
+            use_checkpointing=not args.no_checkpointing,
+            verbose=True,
+        )
+    else:
+        ds = generate_trajectory_ensemble_batched(
+            model, loader,
+            init_indices=init_indices,
+            n_samples=args.n_samples,
+            n_steps=args.n_steps,
+            sampler_generate_kwargs=sampler_kwargs,
+            free_generate_kwargs=free_kwargs,
+            obs_every=args.obs_every,
+            obs_offset=args.obs_offset,
+            reinit_every=args.reinit_every,
+            device=args.device,
+            seed=args.seed,
+            chunk_size=args.chunk_size,
+            verbose=True,
+        )
     wall = time.perf_counter() - t0
     logger.info("Trajectory rollout done in %.1fs", wall)
 

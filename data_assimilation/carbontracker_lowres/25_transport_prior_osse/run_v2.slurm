@@ -32,9 +32,16 @@ NOPT=${NOPT:-30}
 CHUNK=${CHUNK:-100}
 PHASE=${PHASE:-24}
 NOISE_SCALE=${NOISE_SCALE:-1.0}
+OBS_FRACTION=${OBS_FRACTION:-}
+SEED=${SEED:-42}
 
-EXTRA=""
-if [ "${METHOD}" = "dflow" ]; then EXTRA="--n-opt-steps ${NOPT}"; fi
+EXTRA="--seed ${SEED}"
+if [ "${METHOD}" = "dflow" ]; then EXTRA="${EXTRA} --n-opt-steps ${NOPT}"; fi
+if [ -n "${OBS_FRACTION}" ]; then EXTRA="${EXTRA} --obs-fraction ${OBS_FRACTION}"; fi
+if [ -n "${ODE_STEPS}" ]; then EXTRA="${EXTRA} --ode-steps ${ODE_STEPS}"; fi
+if [ -n "${GUIDANCE}" ]; then EXTRA="${EXTRA} --guidance-strength ${GUIDANCE}"; fi
+if [ -n "${SMOOTH}" ]; then EXTRA="${EXTRA} --spatial-smoothing ${SMOOTH}"; fi
+if [ -n "${GCLIP}" ]; then EXTRA="${EXTRA} --grad-clip-norm ${GCLIP}"; fi
 
 cd "${EXP_DIR}"
 srun "${PYBIN}" -u eval_trajectory_v2.py \
