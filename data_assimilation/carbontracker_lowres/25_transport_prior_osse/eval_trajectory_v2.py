@@ -55,6 +55,9 @@ PHASE25G_DIR = (
 PHASE25G_ROLLOUT_FT_DIR = (
     EXP_DIR.parent / "25c_v4_residual_fm" / "phase2b_residual_fm_rollout_ft"
 )
+PHASE25P_DIR = (
+    EXP_DIR.parent / "25c_v4_residual_fm" / "phase2c_residual_fm_ema"
+)
 DEFAULT_DATA_ROOT = "/Net/Groups/BGI/tscratch/vbenson/graph_tm/data/Carbontracker"
 
 
@@ -79,8 +82,10 @@ def main():
     p.add_argument("--noise-scale", type=float, default=1.0,
                    help="AWG-style initial-noise scaling rho. >1 widens the source "
                         "distribution to counter AR underdispersion (Phase 25e).")
-    p.add_argument("--phase", choices=["24", "25g", "25g_rollout_ft"], default="24",
-                   help="Which model to load: 24 = Phase 24 FM, 25g = ResidualFlowMatching (Phase 25g), 25g_rollout_ft = Phase 2b rollout-FT residual-FM.")
+    p.add_argument("--phase", choices=["24", "25g", "25g_rollout_ft", "25p"], default="24",
+                   help="Which model to load: 24, 25g, 25g_rollout_ft, or 25p (Phase 2c residual-FM with EMA + 40k steps).")
+    p.add_argument("--ema", action="store_true",
+                   help="Load EMA shadow weights from the checkpoint (FM/diffusion best practice).")
     p.add_argument("--obs-fraction", type=float, default=None,
                    help="Override the satellite-mask obs_fraction (default 0.3 from configs.py).")
     # Phase 25i: per-knob FMPS overrides (post-Optuna sweep).
@@ -119,13 +124,15 @@ def main():
                    help="Scale factor for past-state Kalman gain (0=no smoothing, 1=full). Mitigates spurious cross-cov from small ensemble.")
     args = p.parse_args()
 
-    if args.phase == "25g_rollout_ft":
+    if args.phase == "25p":
+        model_dir = PHASE25P_DIR
+    elif args.phase == "25g_rollout_ft":
         model_dir = PHASE25G_ROLLOUT_FT_DIR
     elif args.phase == "25g":
         model_dir = PHASE25G_DIR
     else:
         model_dir = PHASE24_DIR
-    model = load_model(model_dir, ckpt=args.ckpt, device=args.device)
+    model = load_model(model_dir, ckpt=args.ckpt, device=args.device, ema=args.ema)
     logger.info("Loaded model from %s (phase=%s)", model_dir, args.phase)
 
     data_cfg = DataConfig(

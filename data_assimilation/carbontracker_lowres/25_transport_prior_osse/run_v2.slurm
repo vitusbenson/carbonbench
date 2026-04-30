@@ -42,6 +42,7 @@ if [ -n "${ODE_STEPS}" ]; then EXTRA="${EXTRA} --ode-steps ${ODE_STEPS}"; fi
 if [ -n "${GUIDANCE}" ]; then EXTRA="${EXTRA} --guidance-strength ${GUIDANCE}"; fi
 if [ -n "${SMOOTH}" ]; then EXTRA="${EXTRA} --spatial-smoothing ${SMOOTH}"; fi
 if [ -n "${GCLIP}" ]; then EXTRA="${EXTRA} --grad-clip-norm ${GCLIP}"; fi
+if [ "${EMA}" = "1" ]; then EXTRA="${EXTRA} --ema"; fi
 
 cd "${EXP_DIR}"
 srun "${PYBIN}" -u eval_trajectory_v2.py \

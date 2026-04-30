@@ -38,6 +38,7 @@ EXTRA="--seed ${SEED}"
 if [ -n "${OBS_FRACTION}" ]; then EXTRA="${EXTRA} --obs-fraction ${OBS_FRACTION}"; fi
 if [ "${HYBRID}" = "1" ]; then EXTRA="${EXTRA} --enkf-hybrid"; fi
 if [ "${BIAS}" = "1" ]; then EXTRA="${EXTRA} --enkf-global-bias-correct"; fi
+if [ "${EMA}" = "1" ]; then EXTRA="${EXTRA} --ema"; fi
 
 cd "${EXP_DIR}"
 srun "${PYBIN}" -u eval_trajectory_v2.py \
