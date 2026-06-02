@@ -90,6 +90,11 @@ def main():
                    help="Use the real 20-level AK shape, or flatten it (AK ablation).")
     p.add_argument("--thin-fraction", type=float, default=1.0,
                    help="Keep this fraction of real observed cells (sparsity ablation).")
+    # FMPS knob overrides (idealised-tuned defaults transfer poorly to sparse orbits)
+    p.add_argument("--spatial-smoothing", type=float, default=None,
+                   help="Override FMPS spatial_smoothing_sigma (default ~4.0; too large for sparse orbits).")
+    p.add_argument("--guidance-strength", type=float, default=None,
+                   help="Override FMPS guidance_strength (default ~46).")
     p.add_argument("--chunk-size", type=int, default=None)
     args = p.parse_args()
 
@@ -169,6 +174,10 @@ def main():
         if args.noise_scale != 1.0:
             sampler_kwargs["noise_scale"] = args.noise_scale
         sampler_kwargs["sigma_obs"] = args.sigma_obs
+        if args.spatial_smoothing is not None:
+            sampler_kwargs["spatial_smoothing_sigma"] = args.spatial_smoothing
+        if args.guidance_strength is not None:
+            sampler_kwargs["guidance_strength"] = args.guidance_strength
         ds = generate_trajectory_ensemble_batched(
             model, loader,
             init_indices=init_indices,
