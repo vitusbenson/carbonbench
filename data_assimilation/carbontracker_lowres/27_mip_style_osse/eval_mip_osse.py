@@ -23,6 +23,7 @@ Usage (smoke):
 import argparse
 import json
 import logging
+import sys
 import time
 from pathlib import Path
 
@@ -40,6 +41,10 @@ from neural_transport.inference.generation import (
 from neural_transport.inference.orbit_obs import OrbitObsProvider
 from neural_transport.training.train import load_model
 
+# Reuse the idealised-OSSE FMPS/D-Flow config helpers.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "25_transport_prior_osse"))
+from configs import adapt_for_trajectory, load_method_config  # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -56,7 +61,7 @@ DEFAULT_ORBIT_ZARR = (
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--method", choices=["enkf", "none"], default="enkf")
+    p.add_argument("--method", choices=["enkf", "fmps", "none"], default="enkf")
     p.add_argument("--model-dir", default=str(DEFAULT_MODEL_DIR))
     p.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
     p.add_argument("--split", default="test")
@@ -113,7 +118,7 @@ def main():
     nlat, nlon = loader.grid_info.nlat, loader.grid_info.nlon
 
     orbit_obs = None
-    if args.method == "enkf":
+    if args.method in ("enkf", "fmps"):
         orbit_obs = OrbitObsProvider(args.orbit_zarr, nlat=nlat, nlon=nlon)
         # Report realised obs coverage over the init windows for transparency.
         times = loader.dataset.ds.time.values
@@ -149,6 +154,30 @@ def main():
             inflation=args.enkf_inflation,
             prior_inflation=args.enkf_prior_inflation,
             loc_sigma=args.enkf_loc_sigma,
+            orbit_obs=orbit_obs,
+            obs_noise=args.obs_noise,
+            ak_mode=args.ak_mode,
+            thin_fraction=args.thin_fraction,
+            device=args.device,
+            seed=args.seed,
+            chunk_size=args.chunk_size,
+            verbose=True,
+        )
+    elif args.method == "fmps":
+        cfg = load_method_config("fmps", n_samples=args.n_samples)
+        sampler_kwargs = adapt_for_trajectory(cfg, n_samples=args.n_samples, method="fmps")
+        if args.noise_scale != 1.0:
+            sampler_kwargs["noise_scale"] = args.noise_scale
+        sampler_kwargs["sigma_obs"] = args.sigma_obs
+        ds = generate_trajectory_ensemble_batched(
+            model, loader,
+            init_indices=init_indices,
+            n_samples=args.n_samples,
+            n_steps=args.n_steps,
+            sampler_generate_kwargs=sampler_kwargs,
+            free_generate_kwargs={"n_samples": 1, "masking": False, "noise_scale": args.noise_scale},
+            obs_every=args.obs_every,
+            obs_offset=args.obs_offset,
             orbit_obs=orbit_obs,
             obs_noise=args.obs_noise,
             ak_mode=args.ak_mode,
