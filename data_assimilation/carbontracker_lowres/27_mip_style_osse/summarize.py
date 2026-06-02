@@ -49,7 +49,7 @@ def main():
 
     df = pd.DataFrame(rows).sort_values("run")
     print("\n## P3 MIP-style OSSE — summary\n")
-    print(df.to_markdown(index=False))
+    print(df.to_string(index=False))
 
     # EnKF-vs-free gain per lead (use the canonical full runs if present).
     free = next((k for k in per_lead if k.startswith("none_full")), None)
@@ -63,7 +63,7 @@ def main():
                 en = per_lead[enkf].loc[lead]
                 gl.append({"lead": lead, "free": round(fr, 3), "enkf": round(en, 3),
                            "gain_%": round(100 * (fr - en) / fr, 1)})
-        print(pd.DataFrame(gl).to_markdown(index=False))
+        print(pd.DataFrame(gl).to_string(index=False))
 
 
 if __name__ == "__main__":
