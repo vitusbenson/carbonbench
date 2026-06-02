@@ -90,6 +90,8 @@ def main():
                         "or 25p2 (Phase 25p.B residual-FM on EMA-frozen phase1p_uniform f_det).")
     p.add_argument("--ema", action="store_true",
                    help="Load EMA shadow weights from the checkpoint (FM/diffusion best practice).")
+    p.add_argument("--model-dir", default=None,
+                   help="Override the phase-based model directory (e.g. a leak-free P2 run dir).")
     p.add_argument("--obs-fraction", type=float, default=None,
                    help="Override the satellite-mask obs_fraction (default 0.3 from configs.py).")
     # Phase 25i: per-knob FMPS overrides (post-Optuna sweep).
@@ -138,6 +140,8 @@ def main():
         model_dir = PHASE25G_DIR
     else:
         model_dir = PHASE24_DIR
+    if args.model_dir is not None:
+        model_dir = Path(args.model_dir)
     model = load_model(model_dir, ckpt=args.ckpt, device=args.device, ema=args.ema)
     logger.info("Loaded model from %s (phase=%s)", model_dir, args.phase)
 
