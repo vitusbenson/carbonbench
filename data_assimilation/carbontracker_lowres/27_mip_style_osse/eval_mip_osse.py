@@ -100,6 +100,9 @@ def main():
                    help="Override FMPS spatial_smoothing_sigma (default ~4.0; too large for sparse orbits).")
     p.add_argument("--guidance-strength", type=float, default=None,
                    help="Override FMPS guidance_strength (default ~46).")
+    p.add_argument("--no-fresh-noise", action="store_true",
+                   help="FlowDPS: reuse initial noise (deterministic refinement) instead of "
+                        "re-drawing fresh noise each ODE step. Cuts sampling-process variance.")
     p.add_argument("--chunk-size", type=int, default=None)
     args = p.parse_args()
 
@@ -183,6 +186,8 @@ def main():
             sampler_kwargs["spatial_smoothing_sigma"] = args.spatial_smoothing
         if args.guidance_strength is not None:
             sampler_kwargs["guidance_strength"] = args.guidance_strength
+        if args.no_fresh_noise:
+            sampler_kwargs["fresh_noise"] = False
         ds = generate_trajectory_ensemble_batched(
             model, loader,
             init_indices=init_indices,
