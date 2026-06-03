@@ -61,7 +61,12 @@ DEFAULT_ORBIT_ZARR = (
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--method", choices=["enkf", "fmps", "none"], default="enkf")
+    p.add_argument("--method", choices=["enkf", "fmps", "none"], default="enkf",
+                   help="enkf, none (free), or fmps (= any posterior sampler; see --sampler).")
+    p.add_argument("--sampler", default="fmps",
+                   choices=["fmps", "flowdps", "sde", "mcg", "pcfm", "dps", "fig", "ictm"],
+                   help="Posterior sampler used when --method fmps. flowdps = closed-form "
+                        "PGDM projection (best for our linear operator).")
     p.add_argument("--model-dir", default=str(DEFAULT_MODEL_DIR))
     p.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
     p.add_argument("--split", default="test")
@@ -169,8 +174,8 @@ def main():
             verbose=True,
         )
     elif args.method == "fmps":
-        cfg = load_method_config("fmps", n_samples=args.n_samples)
-        sampler_kwargs = adapt_for_trajectory(cfg, n_samples=args.n_samples, method="fmps")
+        cfg = load_method_config(args.sampler, n_samples=args.n_samples)
+        sampler_kwargs = adapt_for_trajectory(cfg, n_samples=args.n_samples, method=args.sampler)
         if args.noise_scale != 1.0:
             sampler_kwargs["noise_scale"] = args.noise_scale
         sampler_kwargs["sigma_obs"] = args.sigma_obs
