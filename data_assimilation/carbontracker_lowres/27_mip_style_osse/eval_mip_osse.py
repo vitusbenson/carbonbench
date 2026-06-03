@@ -37,6 +37,7 @@ from neural_transport.inference.analyse import compute_trajectory_ensemble_metri
 from neural_transport.inference.generation import (
     generate_trajectory_enkf,
     generate_trajectory_ensemble_batched,
+    generate_trajectory_window_dflow,
 )
 from neural_transport.inference.orbit_obs import OrbitObsProvider
 from neural_transport.training.train import load_model
@@ -61,8 +62,12 @@ DEFAULT_ORBIT_ZARR = (
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--method", choices=["enkf", "fmps", "none"], default="enkf",
-                   help="enkf, none (free), or fmps (= any posterior sampler; see --sampler).")
+    p.add_argument("--method", choices=["enkf", "fmps", "window_dflow", "none"], default="enkf",
+                   help="enkf, none (free), fmps (= any posterior sampler; see --sampler), or "
+                        "window_dflow (4-D window optimization smoother).")
+    p.add_argument("--window-size", type=int, default=4, help="window_dflow: AR steps per window.")
+    p.add_argument("--n-opt-steps", type=int, default=20, help="window_dflow: Adam iters per window.")
+    p.add_argument("--lr", type=float, default=1e-2, help="window_dflow: Adam lr.")
     p.add_argument("--sampler", default="fmps",
                    choices=["fmps", "flowdps", "sde", "mcg", "pcfm", "dps", "fig", "ictm"],
                    help="Posterior sampler used when --method fmps. flowdps = closed-form "
@@ -131,7 +136,7 @@ def main():
     nlat, nlon = loader.grid_info.nlat, loader.grid_info.nlon
 
     orbit_obs = None
-    if args.method in ("enkf", "fmps"):
+    if args.method in ("enkf", "fmps", "window_dflow"):
         orbit_obs = OrbitObsProvider(args.orbit_zarr, nlat=nlat, nlon=nlon)
         # Report realised obs coverage over the init windows for transparency.
         times = loader.dataset.ds.time.values
@@ -197,6 +202,29 @@ def main():
             free_generate_kwargs={"n_samples": 1, "masking": False, "noise_scale": args.noise_scale},
             obs_every=args.obs_every,
             obs_offset=args.obs_offset,
+            orbit_obs=orbit_obs,
+            obs_noise=args.obs_noise,
+            ak_mode=args.ak_mode,
+            thin_fraction=args.thin_fraction,
+            device=args.device,
+            seed=args.seed,
+            chunk_size=args.chunk_size,
+            verbose=True,
+        )
+    elif args.method == "window_dflow":
+        ds = generate_trajectory_window_dflow(
+            model, loader,
+            init_indices=init_indices,
+            n_samples=args.n_samples,
+            n_steps=args.n_steps,
+            obs_kwargs={"noise_scale": args.noise_scale},
+            free_kwargs={"noise_scale": args.noise_scale, "masking": False},
+            obs_every=args.obs_every,
+            obs_offset=args.obs_offset,
+            window_size=args.window_size,
+            n_opt_steps=args.n_opt_steps,
+            lr=args.lr,
+            sigma_obs=args.sigma_obs,
             orbit_obs=orbit_obs,
             obs_noise=args.obs_noise,
             ak_mode=args.ak_mode,
