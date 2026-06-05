@@ -36,6 +36,7 @@ from neural_transport.data.inference_loader import InferenceDataLoader
 from neural_transport.inference.analyse import compute_trajectory_ensemble_metrics
 from neural_transport.inference.generation import (
     generate_trajectory_enkf,
+    generate_trajectory_enks,
     generate_trajectory_ensemble_batched,
     generate_trajectory_window_dflow,
 )
@@ -62,9 +63,12 @@ DEFAULT_ORBIT_ZARR = (
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--method", choices=["enkf", "fmps", "window_dflow", "none"], default="enkf",
-                   help="enkf, none (free), fmps (= any posterior sampler; see --sampler), or "
+    p.add_argument("--method", choices=["enkf", "enks", "fmps", "window_dflow", "none"], default="enkf",
+                   help="enkf, enks (fixed-lag Ensemble Kalman Smoother), none (free), "
+                        "fmps (= any posterior sampler; see --sampler), or "
                         "window_dflow (4-D window optimization smoother).")
+    p.add_argument("--enks-lag", type=int, default=24, help="enks: fixed smoother lag (AR steps).")
+    p.add_argument("--enks-damping", type=float, default=1.0, help="enks: backward increment damping.")
     p.add_argument("--window-size", type=int, default=4, help="window_dflow: AR steps per window.")
     p.add_argument("--n-opt-steps", type=int, default=20, help="window_dflow: Adam iters per window.")
     p.add_argument("--lr", type=float, default=1e-2, help="window_dflow: Adam lr.")
@@ -136,7 +140,7 @@ def main():
     nlat, nlon = loader.grid_info.nlat, loader.grid_info.nlon
 
     orbit_obs = None
-    if args.method in ("enkf", "fmps", "window_dflow"):
+    if args.method in ("enkf", "enks", "fmps", "window_dflow"):
         orbit_obs = OrbitObsProvider(args.orbit_zarr, nlat=nlat, nlon=nlon)
         # Report realised obs coverage over the init windows for transparency.
         times = loader.dataset.ds.time.values
@@ -172,6 +176,31 @@ def main():
             inflation=args.enkf_inflation,
             prior_inflation=args.enkf_prior_inflation,
             loc_sigma=args.enkf_loc_sigma,
+            orbit_obs=orbit_obs,
+            obs_noise=args.obs_noise,
+            ak_mode=args.ak_mode,
+            thin_fraction=args.thin_fraction,
+            device=args.device,
+            seed=args.seed,
+            chunk_size=args.chunk_size,
+            verbose=True,
+        )
+    elif args.method == "enks":
+        ds = generate_trajectory_enks(
+            model, loader,
+            init_indices=init_indices,
+            n_samples=args.n_samples,
+            n_steps=args.n_steps,
+            obs_kwargs={},
+            free_kwargs={"n_samples": 1, "masking": False, "noise_scale": args.noise_scale},
+            obs_every=args.obs_every,
+            obs_offset=args.obs_offset,
+            sigma_obs=args.sigma_obs,
+            inflation=args.enkf_inflation,
+            prior_inflation=args.enkf_prior_inflation,
+            loc_sigma=args.enkf_loc_sigma,
+            lag=args.enks_lag,
+            damping=args.enks_damping,
             orbit_obs=orbit_obs,
             obs_noise=args.obs_noise,
             ak_mode=args.ak_mode,
@@ -305,7 +334,7 @@ def main():
     info = {
         "eval": f"mip_osse_{args.tag}", "method": args.method,
         "model_dir": str(model_dir), "data_root": args.data_root, "split": args.split,
-        "orbit_zarr": args.orbit_zarr if args.method == "enkf" else None,
+        "orbit_zarr": args.orbit_zarr if args.method in ("enkf", "enks", "fmps", "window_dflow") else None,
         "wall_time_sec": wall, "n_inits": len(init_indices),
         "n_samples": args.n_samples, "n_steps": args.n_steps,
         "obs_every": args.obs_every, "sigma_obs": args.sigma_obs,
