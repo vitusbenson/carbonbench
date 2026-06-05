@@ -39,6 +39,7 @@ from neural_transport.inference.generation import (
     generate_trajectory_enks,
     generate_trajectory_ensemble_batched,
     generate_trajectory_window_dflow,
+    generate_trajectory_window_sda,
 )
 from neural_transport.inference.orbit_obs import OrbitObsProvider
 from neural_transport.training.train import load_model
@@ -63,13 +64,20 @@ DEFAULT_ORBIT_ZARR = (
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--method", choices=["enkf", "enks", "fmps", "window_dflow", "none"], default="enkf",
+    p.add_argument("--method", choices=["enkf", "enks", "fmps", "window_dflow", "window_sda", "none"],
+                   default="enkf",
                    help="enkf, enks (fixed-lag Ensemble Kalman Smoother), none (free), "
-                        "fmps (= any posterior sampler; see --sampler), or "
-                        "window_dflow (4-D window optimization smoother).")
+                        "fmps (= any posterior sampler; see --sampler), "
+                        "window_dflow (4-D window optimization smoother), or "
+                        "window_sda (single-pass SDA-style Langevin window smoother).")
     p.add_argument("--enks-lag", type=int, default=24, help="enks: fixed smoother lag (AR steps).")
     p.add_argument("--enks-damping", type=float, default=1.0, help="enks: backward increment damping.")
-    p.add_argument("--window-size", type=int, default=4, help="window_dflow: AR steps per window.")
+    p.add_argument("--sda-steps", type=int, default=8, help="window_sda: Langevin steps per window.")
+    p.add_argument("--sda-step-size", type=float, default=0.2, help="window_sda: Langevin step size eps.")
+    p.add_argument("--sda-prior-weight", type=float, default=1.0, help="window_sda: latent prior score weight.")
+    p.add_argument("--sda-temperature", type=float, default=1.0, help="window_sda: Langevin noise temperature.")
+    p.add_argument("--sda-guidance", type=float, default=1.0, help="window_sda: DPS likelihood guidance scale.")
+    p.add_argument("--window-size", type=int, default=4, help="window_dflow/sda: AR steps per window.")
     p.add_argument("--n-opt-steps", type=int, default=20, help="window_dflow: Adam iters per window.")
     p.add_argument("--lr", type=float, default=1e-2, help="window_dflow: Adam lr.")
     p.add_argument("--sampler", default="fmps",
@@ -140,7 +148,7 @@ def main():
     nlat, nlon = loader.grid_info.nlat, loader.grid_info.nlon
 
     orbit_obs = None
-    if args.method in ("enkf", "enks", "fmps", "window_dflow"):
+    if args.method in ("enkf", "enks", "fmps", "window_dflow", "window_sda"):
         orbit_obs = OrbitObsProvider(args.orbit_zarr, nlat=nlat, nlon=nlon)
         # Report realised obs coverage over the init windows for transparency.
         times = loader.dataset.ds.time.values
@@ -263,6 +271,32 @@ def main():
             chunk_size=args.chunk_size,
             verbose=True,
         )
+    elif args.method == "window_sda":
+        ds = generate_trajectory_window_sda(
+            model, loader,
+            init_indices=init_indices,
+            n_samples=args.n_samples,
+            n_steps=args.n_steps,
+            obs_kwargs={"noise_scale": args.noise_scale},
+            free_kwargs={"noise_scale": args.noise_scale, "masking": False},
+            obs_every=args.obs_every,
+            obs_offset=args.obs_offset,
+            window_size=args.window_size,
+            sigma_obs=args.sigma_obs,
+            langevin_steps=args.sda_steps,
+            langevin_step_size=args.sda_step_size,
+            langevin_prior_weight=args.sda_prior_weight,
+            langevin_temperature=args.sda_temperature,
+            guidance_scale=args.sda_guidance,
+            orbit_obs=orbit_obs,
+            obs_noise=args.obs_noise,
+            ak_mode=args.ak_mode,
+            thin_fraction=args.thin_fraction,
+            device=args.device,
+            seed=args.seed,
+            chunk_size=args.chunk_size,
+            verbose=True,
+        )
     else:  # free (no-DA) baseline
         ds = generate_trajectory_ensemble_batched(
             model, loader,
@@ -334,7 +368,7 @@ def main():
     info = {
         "eval": f"mip_osse_{args.tag}", "method": args.method,
         "model_dir": str(model_dir), "data_root": args.data_root, "split": args.split,
-        "orbit_zarr": args.orbit_zarr if args.method in ("enkf", "enks", "fmps", "window_dflow") else None,
+        "orbit_zarr": args.orbit_zarr if args.method in ("enkf", "enks", "fmps", "window_dflow", "window_sda") else None,
         "wall_time_sec": wall, "n_inits": len(init_indices),
         "n_samples": args.n_samples, "n_steps": args.n_steps,
         "obs_every": args.obs_every, "sigma_obs": args.sigma_obs,
