@@ -35,6 +35,7 @@ from neural_transport.configs import DataConfig
 from neural_transport.data.inference_loader import InferenceDataLoader
 from neural_transport.inference.analyse import compute_trajectory_ensemble_metrics
 from neural_transport.inference.generation import (
+    generate_trajectory_amortized,
     generate_trajectory_enkf,
     generate_trajectory_enks,
     generate_trajectory_ensemble_batched,
@@ -64,12 +65,14 @@ DEFAULT_ORBIT_ZARR = (
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--method", choices=["enkf", "enks", "fmps", "window_dflow", "window_sda", "none"],
+    p.add_argument("--method",
+                   choices=["enkf", "enks", "fmps", "window_dflow", "window_sda", "amortized", "none"],
                    default="enkf",
                    help="enkf, enks (fixed-lag Ensemble Kalman Smoother), none (free), "
                         "fmps (= any posterior sampler; see --sampler), "
-                        "window_dflow (4-D window optimization smoother), or "
-                        "window_sda (single-pass SDA-style Langevin window smoother).")
+                        "window_dflow (4-D window optimization smoother), "
+                        "window_sda (single-pass SDA-style Langevin window smoother), or "
+                        "amortized (conditional FM; one-pass posterior, --model-dir = 28_amortized_cond_fm).")
     p.add_argument("--enks-lag", type=int, default=24, help="enks: fixed smoother lag (AR steps).")
     p.add_argument("--enks-damping", type=float, default=1.0, help="enks: backward increment damping.")
     p.add_argument("--sda-steps", type=int, default=8, help="window_sda: Langevin steps per window.")
@@ -120,12 +123,25 @@ def main():
     p.add_argument("--no-fresh-noise", action="store_true",
                    help="FlowDPS: reuse initial noise (deterministic refinement) instead of "
                         "re-drawing fresh noise each ODE step. Cuts sampling-process variance.")
+    # Ceiling diagnostics (P3.8): localize the binding constraint.
+    p.add_argument("--perfect-obs", action="store_true",
+                   help="EnKF: replace 3-D state with truth at obs cells (coverage ceiling).")
+    p.add_argument("--dense-obs", action="store_true",
+                   help="EnKF: column obs at EVERY cell (vertical-dilution ceiling).")
+    p.add_argument("--init-perturb", default=None,
+                   help="Corrupt initial state for the twin-ceiling test, e.g. "
+                        "'anom_scale:0.0' (climatology), 'bias:0.5', 'gauss_noise:1.0'. "
+                        "Applies to enkf/none.")
     p.add_argument("--chunk-size", type=int, default=None)
     args = p.parse_args()
 
+    # The amortized conditional FM lives in its own experiment dir.
+    if args.method == "amortized" and Path(args.model_dir) == DEFAULT_MODEL_DIR:
+        args.model_dir = str(EXP_DIR.parent / "28_amortized_cond_fm")
+
     model_dir = Path(args.model_dir)
     model = load_model(model_dir, ckpt=args.ckpt, device=args.device)
-    logger.info("Loaded leak-free model from %s", model_dir)
+    logger.info("Loaded model from %s", model_dir)
 
     data_cfg = DataConfig(
         dataset="carbontracker",
@@ -148,7 +164,7 @@ def main():
     nlat, nlon = loader.grid_info.nlat, loader.grid_info.nlon
 
     orbit_obs = None
-    if args.method in ("enkf", "enks", "fmps", "window_dflow", "window_sda"):
+    if args.method in ("enkf", "enks", "fmps", "window_dflow", "window_sda", "amortized"):
         orbit_obs = OrbitObsProvider(args.orbit_zarr, nlat=nlat, nlon=nlon)
         # Report realised obs coverage over the init windows for transparency.
         times = loader.dataset.ds.time.values
@@ -188,6 +204,9 @@ def main():
             obs_noise=args.obs_noise,
             ak_mode=args.ak_mode,
             thin_fraction=args.thin_fraction,
+            init_perturb=args.init_perturb,
+            perfect_obs=args.perfect_obs,
+            dense_obs=args.dense_obs,
             device=args.device,
             seed=args.seed,
             chunk_size=args.chunk_size,
@@ -297,6 +316,24 @@ def main():
             chunk_size=args.chunk_size,
             verbose=True,
         )
+    elif args.method == "amortized":
+        ds = generate_trajectory_amortized(
+            model, loader,
+            init_indices=init_indices,
+            n_samples=args.n_samples,
+            n_steps=args.n_steps,
+            obs_every=args.obs_every,
+            obs_offset=args.obs_offset,
+            orbit_obs=orbit_obs,
+            dense_obs=args.dense_obs,
+            obs_noise=args.obs_noise,
+            noise_scale=args.noise_scale,
+            init_perturb=args.init_perturb,
+            device=args.device,
+            seed=args.seed,
+            chunk_size=args.chunk_size,
+            verbose=True,
+        )
     else:  # free (no-DA) baseline
         ds = generate_trajectory_ensemble_batched(
             model, loader,
@@ -307,6 +344,7 @@ def main():
             free_generate_kwargs={"n_samples": 1, "masking": False, "noise_scale": args.noise_scale},
             obs_every=args.obs_every,
             obs_offset=args.obs_offset,
+            init_perturb=args.init_perturb,
             device=args.device,
             seed=args.seed,
             chunk_size=args.chunk_size,
@@ -368,7 +406,7 @@ def main():
     info = {
         "eval": f"mip_osse_{args.tag}", "method": args.method,
         "model_dir": str(model_dir), "data_root": args.data_root, "split": args.split,
-        "orbit_zarr": args.orbit_zarr if args.method in ("enkf", "enks", "fmps", "window_dflow", "window_sda") else None,
+        "orbit_zarr": args.orbit_zarr if args.method in ("enkf", "enks", "fmps", "window_dflow", "window_sda", "amortized") else None,
         "wall_time_sec": wall, "n_inits": len(init_indices),
         "n_samples": args.n_samples, "n_steps": args.n_steps,
         "obs_every": args.obs_every, "sigma_obs": args.sigma_obs,
